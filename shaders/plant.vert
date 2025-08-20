@@ -18,7 +18,6 @@ void main() {
     float height = iHeightPhase.x;
     float phase  = iHeightPhase.y;
 
-    // aPos.y in [0..height] (we built mesh with 0..H), sway grows with height
     float t = clamp(aPos.y / max(height, 0.0001), 0.0, 1.0);
     float sway = sin(uTime*1.6 + phase + t*3.1) * (0.04 + 0.06*t);
 
@@ -28,7 +27,7 @@ void main() {
 
     vec3 world = iBasePos + p;
     vWorldPos = world;
-    vNormal   = normalize(aNormal); // simple
+    vNormal   = normalize(aNormal);
     vColor    = iColor;
     gl_Position = uProj * uView * vec4(world, 1.0);
 }

@@ -26,10 +26,8 @@ void main() {
     vec3 p = aPos;
     p.z += sway * len * 0.35;
 
-    // non-uniform stretch + base scale
     vec3 scaled = p * (iStretch * iPhaseScale.y);
 
-    // orientation basis from iDir
     vec3 f = safe_normalize(iDir);
     vec3 up = vec3(0.0, 1.0, 0.0);
     if (abs(dot(f, up)) > 0.95) up = vec3(1.0, 0.0, 0.0);
