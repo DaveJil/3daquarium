@@ -20,10 +20,13 @@ out float vLen;       // 0..1 along body (x)
 out vec3 vLocal;      // local (animated, stretched)
 out float vSpecies;
 
-// Tangent frame for normal/bump mapping on body:
-// vTanU = along body (forward), vTanV = around body (circumference)
-out vec3 vTanU;
-out vec3 vTanV;
+// Tangent frame for bump/normal mapping on body/fins
+out vec3 vTanU;       // along body (forward)
+out vec3 vTanV;       // around body (circumference)
+
+// Fin data
+out float vFinMask;   // 1 for fin triangles, else 0
+out vec2  vFinUV;     // local UV for fin patterns
 
 vec3 safe_normalize(vec3 v){ float l=length(v); return (l>1e-6)? v/l : vec3(0,0,-1); }
 
@@ -33,7 +36,7 @@ void main(){
 
     float len = clamp(aPos.x, 0.0, 1.0);
 
-    // simple swim (tail sway)
+    // swim (tail sway)
     float sway = sin(uTime * 5.0 + phase + len*1.6) * 0.28 * len;
     vec3 p = aPos;
     p.z += sway * len * 0.4;
@@ -41,16 +44,16 @@ void main(){
     // anisotropic scaling of the base body
     vec3 scaled = p * (iStretch * scale);
 
-    // build orthonormal basis from swimming direction
-    vec3 f = safe_normalize(iDir);                 // forward = along body (u)
+    // basis from swimming direction
+    vec3 f = safe_normalize(iDir);                 // forward
     vec3 up = abs(dot(f, vec3(0,1,0))) > 0.95 ? vec3(1,0,0) : vec3(0,1,0);
-    vec3 r = normalize(cross(up, f));              // “right” = around body (v)
-    vec3 u = cross(f, r);                          // secondary orthogonal
-
+    vec3 r = normalize(cross(up, f));              // “right” (around body)
+    vec3 u = cross(f, r);                          // “up”  (completes basis)
     mat3 B = mat3(r, u, f);                        // columns: r,u,f
 
     vec3 world = B * scaled + iPos;
 
+    // outputs
     vWorldPos = world;
     vNormal   = normalize(B * aNormal);
     vColor    = iColor;
@@ -58,9 +61,16 @@ void main(){
     vLocal    = scaled;
     vSpecies  = iSpecies;
 
-    // pass tangent frame (world space)
-    vTanU = normalize(f);   // along body (u)
-    vTanV = normalize(r);   // around body (v)
+    // tangent frame (world)
+    vTanU = normalize(f);   // along body
+    vTanV = normalize(r);   // around body
+
+    // Identify tail-fin triangles: our mesh gave them ±Z normals and x≈1
+    bool isFin = (abs(aNormal.z) > 0.95 && aPos.x > 0.98);
+    vFinMask = isFin ? 1.0 : 0.0;
+
+    // Fin UVs in local space (scaled for nice ripple frequency)
+    vFinUV = vec2(scaled.y, scaled.z) * 6.0;
 
     gl_Position = uProj * uView * vec4(world, 1.0);
 }
