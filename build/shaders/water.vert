@@ -18,6 +18,7 @@ void main() {
 
     vec3 pos = aPos + vec3(0.0, wave, 0.0);
     vFoam = smoothstep(0.02, 0.045, abs(wave));
+
     vec4 world = uModel * vec4(pos, 1.0);
     vWorldPos = world.xyz;
     gl_Position = uProj * uView * world;
