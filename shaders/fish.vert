@@ -17,8 +17,13 @@ out vec3 vWorldPos;
 out vec3 vNormal;
 out vec3 vColor;
 out float vLen;       // 0..1 along body (x)
-out vec3 vLocal;      // local pos after animation
+out vec3 vLocal;      // local (animated, stretched)
 out float vSpecies;
+
+// Tangent frame for normal/bump mapping on body:
+// vTanU = along body (forward), vTanV = around body (circumference)
+out vec3 vTanU;
+out vec3 vTanV;
 
 vec3 safe_normalize(vec3 v){ float l=length(v); return (l>1e-6)? v/l : vec3(0,0,-1); }
 
@@ -27,18 +32,22 @@ void main(){
     float scale = iPhaseScale.y;
 
     float len = clamp(aPos.x, 0.0, 1.0);
+
+    // simple swim (tail sway)
     float sway = sin(uTime * 5.0 + phase + len*1.6) * 0.28 * len;
     vec3 p = aPos;
     p.z += sway * len * 0.4;
 
+    // anisotropic scaling of the base body
     vec3 scaled = p * (iStretch * scale);
 
-    // build basis from direction
-    vec3 f = safe_normalize(iDir);
+    // build orthonormal basis from swimming direction
+    vec3 f = safe_normalize(iDir);                 // forward = along body (u)
     vec3 up = abs(dot(f, vec3(0,1,0))) > 0.95 ? vec3(1,0,0) : vec3(0,1,0);
-    vec3 r = normalize(cross(up, f));
-    vec3 u = cross(f, r);
-    mat3 B = mat3(r, u, f);
+    vec3 r = normalize(cross(up, f));              // “right” = around body (v)
+    vec3 u = cross(f, r);                          // secondary orthogonal
+
+    mat3 B = mat3(r, u, f);                        // columns: r,u,f
 
     vec3 world = B * scaled + iPos;
 
@@ -48,6 +57,10 @@ void main(){
     vLen      = len;
     vLocal    = scaled;
     vSpecies  = iSpecies;
+
+    // pass tangent frame (world space)
+    vTanU = normalize(f);   // along body (u)
+    vTanV = normalize(r);   // around body (v)
 
     gl_Position = uProj * uView * vec4(world, 1.0);
 }
