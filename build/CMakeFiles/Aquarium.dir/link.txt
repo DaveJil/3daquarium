@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/Aquarium.dir/src/main.cpp.o -o Aquarium  _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation
