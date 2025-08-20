@@ -6,9 +6,9 @@
 
 #ifdef __APPLE__
   #define GL_SILENCE_DEPRECATION
-  #include <OpenGL/gl3.h>   // macOS OpenGL 4.1 core
+  #include <OpenGL/gl3.h>   // macOS OpenGL 4.1 core profile
 #else
-  #error "This setup is macOS-only. For Windows/Linux, use the GLEW/GLAD path."
+  #error "This setup is macOS-only. For Windows/Linux, use GLAD/GLEW."
 #endif
 #include <GLFW/glfw3.h>
 
@@ -16,11 +16,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// ------------------------- Window & Camera -------------------------
+// ========================= Window & Camera =========================
 static int SCR_W = 1280, SCR_H = 720;
 
 static float camYaw = -90.0f, camPitch = -5.0f;
-// START INSIDE THE TANK
+// Start INSIDE the tank
 static glm::vec3 camPos(0.0f, 0.10f, 0.0f);
 static glm::vec3 camFront(0.0f, 0.0f, -1.0f);
 static glm::vec3 camUp(0.0f, 1.0f, 0.0f);
@@ -28,9 +28,22 @@ static bool firstMouse = true;
 static double lastX = SCR_W * 0.5, lastY = SCR_H * 0.5;
 static bool wireframe = false;
 
+// ================ Screen copy texture (for water refraction) ================
+static GLuint gSceneTex = 0;
+static void ensureSceneTex() {
+    if (!gSceneTex) glGenTextures(1, &gSceneTex);
+    glBindTexture(GL_TEXTURE_2D, gSceneTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SCR_W, SCR_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
 static void framebuffer_size_callback(GLFWwindow*, int w, int h) {
     SCR_W = w; SCR_H = h;
     glViewport(0, 0, w, h);
+    ensureSceneTex();
 }
 static void mouse_callback(GLFWwindow*, double xpos, double ypos) {
     if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
@@ -58,7 +71,7 @@ static void process_input(GLFWwindow* win, float dt) {
     if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) camPos.y += vel;
 }
 
-// ------------------------- Utilities -------------------------
+// ========================= Utilities =========================
 static GLuint compileShader(GLenum type, const char* src, const char* name) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -92,10 +105,10 @@ static std::string loadFile(const char* path) {
     return s;
 }
 
-// ------------------------- Geometry Helpers -------------------------
+// ========================= Geometry Helpers =========================
 struct Mesh { GLuint vao=0, vbo=0, ebo=0; GLsizei idxCount=0; };
 
-// Tank walls (inward-facing normals)
+// Tank (inward-facing)
 static Mesh makeBox(float w, float h, float d) {
     float x=w*0.5f, y=h*0.5f, z=d*0.5f;
     struct V { glm::vec3 p,n; };
@@ -123,7 +136,7 @@ static Mesh makeBox(float w, float h, float d) {
     return m;
 }
 
-// Water plane (position + UV in attrib 0/2)
+// Water grid (pos+uv)
 static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.2f, float sz=1.8f, float y=0.45f) {
     struct V { glm::vec3 p; glm::vec2 uv; };
     std::vector<V> v; v.reserve((nx+1)*(nz+1));
@@ -148,7 +161,7 @@ static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.2f, float sz=1.8f,
     return m;
 }
 
-// Floor plane (with normals)
+// Floor (sand)
 static Mesh makeFloor(float sx=3.2f, float sz=1.8f, float y=-0.9f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v = {
@@ -170,17 +183,17 @@ static Mesh makeFloor(float sx=3.2f, float sz=1.8f, float y=-0.9f) {
     return m;
 }
 
-// Rounded fusiform fish mesh (base shape)
+// Fish body (fusiform)
 static Mesh makeFishMesh() {
     struct V { glm::vec3 p,n; };
     std::vector<V> v; std::vector<unsigned> idx;
 
     auto push = [&](const glm::vec3& p, const glm::vec3& n){ v.push_back({p, glm::normalize(n)}); };
 
-    const int   segX = 22;        // length segments
-    const int   segR = 18;        // radial segments
-    const float rMax = 0.06f;     // slimmer by default (we stretch per-instance)
-    const float zFlatten = 0.65f; // thinner left-right
+    const int   segX = 22;
+    const int   segR = 18;
+    const float rMax = 0.06f;
+    const float zFlatten = 0.65f;
 
     for (int i=0; i<=segX; ++i) {
         float t = (float)i / (float)segX;
@@ -208,7 +221,7 @@ static Mesh makeFishMesh() {
         v.push_back({nose, glm::vec3(-1,0,0)});
         for (int j=0; j<segR; ++j) { unsigned a=j, b=j+1; idx.insert(idx.end(), {baseCenter, b, a}); }
     }
-    // simple tail fin each side
+    // tail fin
     {
         float x = 1.05f;
         glm::vec3 tU = {x,  0.14f,  0.0f}, tD = {x, -0.14f,  0.0f};
@@ -233,7 +246,7 @@ static Mesh makeFishMesh() {
     return m;
 }
 
-// Simple vertical strip for a plant (sway in shader)
+// Plant strip (instanced)
 static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width = 0.027f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v;
@@ -241,7 +254,7 @@ static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width =
     for (int i=0;i<=segments;++i) {
         float t = (float)i/segments;
         float y = t * height;
-        float w = width * (0.7f + 0.3f * (1.0f - t)); // narrower near tip
+        float w = width * (0.7f + 0.3f * (1.0f - t));
         v.push_back({glm::vec3(-w*0.5f, y, 0.0f), glm::vec3(0,0,1)});
         v.push_back({glm::vec3( w*0.5f, y, 0.0f), glm::vec3(0,0,1)});
         if (i<segments) {
@@ -261,13 +274,13 @@ static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width =
     return m;
 }
 
-// A simple dome "rock" (hemisphere)
+// Rock dome (hemisphere)
 static Mesh makeRockDome(int rings=10, int sectors=16, float radius=0.18f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v; std::vector<unsigned> idx;
     for (int r=0;r<=rings;++r) {
-        float vr = (float)r/rings;           // 0..1
-        float phi = (vr*0.5f)*3.14159f;      // 0..pi/2
+        float vr = (float)r/rings;
+        float phi = (vr*0.5f)*3.14159f;
         for (int s=0;s<=sectors;++s) {
             float vs = (float)s/sectors;
             float theta = vs*2.0f*3.14159f;
@@ -295,7 +308,7 @@ static Mesh makeRockDome(int rings=10, int sectors=16, float radius=0.18f) {
     return m;
 }
 
-// ------------------------- Species & Instances -------------------------
+// ========================= Species & Instances =========================
 struct FishInst { glm::vec3 pos, vel; float phase; float scale; glm::vec3 stretch; glm::vec3 color; };
 
 static std::vector<FishInst> minis, darters, loaches;
@@ -306,10 +319,10 @@ static Mesh fishMesh, plantMesh, tankMesh, floorMesh, waterMesh, rockMesh;
 static const glm::vec3 TANK_EXTENTS = {3.5f*0.5f - 0.05f, 0.9f, 1.8f*0.5f - 0.05f}; // inner bounds
 static float waterY = 0.45f;
 
-// counts (reduced clustering)
-static int N_MINIS   = 60;  // small school
-static int N_DARTERS = 16;  // roamers
-static int N_LOACHES = 10;  // bottom huggers
+// counts
+static int N_MINIS   = 60;
+static int N_DARTERS = 16;
+static int N_LOACHES = 10;
 
 // plants & rocks
 static int N_PLANTS = 55;
@@ -326,7 +339,7 @@ static std::mt19937 rng(2025);
 static std::uniform_real_distribution<float> urand(-1.0f, 1.0f);
 static std::uniform_real_distribution<float> urand01(0.0f, 1.0f);
 
-// ---- Fish initializers ----
+// init fish
 static void initSpecies(std::vector<FishInst>& v, int count,
                         glm::vec3 baseColor, glm::vec3 varyColor,
                         glm::vec3 stretchMean, glm::vec3 stretchVar,
@@ -345,9 +358,7 @@ static void initSpecies(std::vector<FishInst>& v, int count,
     }
 }
 
-// plants & rocks
 static void initPlantsAndRocks() {
-    // plants
     plantPos.resize(N_PLANTS);
     plantHP.resize(N_PLANTS);
     plantColor.resize(N_PLANTS);
@@ -371,7 +382,6 @@ static void initPlantsAndRocks() {
     glEnableVertexAttribArray(10); glVertexAttribPointer(10,3,GL_FLOAT,GL_FALSE,sizeof(float)*8,(void*)(sizeof(float)*5)); glVertexAttribDivisor(10,1);
     glBindVertexArray(0);
 
-    // rocks
     rocks.resize(N_ROCKS);
     for (int i=0;i<N_ROCKS;++i) {
         float x = urand(rng)*TANK_EXTENTS.x*0.75f;
@@ -381,12 +391,11 @@ static void initPlantsAndRocks() {
     }
 }
 
-// ---- Fish VAO/VBO setup (shared mesh, per-species instance VBOs) ----
 static void setupFishInstancing(GLuint &instVBO, const Mesh& m, int count) {
     if (!instVBO) glGenBuffers(1, &instVBO);
     glBindVertexArray(m.vao);
     glBindBuffer(GL_ARRAY_BUFFER, instVBO);
-    // per-instance: iPos(3), iDir(3), iPhase(1), iScale(1), iStretch(3), iColor(3) = 14 floats
+    // per-instance: pos(3) dir(3) phase(1) scale(1) stretch(3) color(3) = 14 floats
     glBufferData(GL_ARRAY_BUFFER, count * (sizeof(float)*14), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(3); glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,sizeof(float)*14,(void*)0);                 glVertexAttribDivisor(3,1);
     glEnableVertexAttribArray(4); glVertexAttribPointer(4,3,GL_FLOAT,GL_FALSE,sizeof(float)*14,(void*)(sizeof(float)*3));  glVertexAttribDivisor(4,1);
@@ -396,7 +405,7 @@ static void setupFishInstancing(GLuint &instVBO, const Mesh& m, int count) {
     glBindVertexArray(0);
 }
 
-// ---- Species updates (different behaviors) ----
+// behaviors
 static void updateMinis(float dt) {
     const float maxSpeed = 1.4f;
     const float neighborDist2 = 0.18f;
@@ -455,7 +464,7 @@ static void updateLoaches(float dt) {
     }
 }
 
-// ------------------------- Bubbles -------------------------
+// ========================= Bubbles =========================
 static const int N_BUB = 90;
 static std::vector<glm::vec3> bubblePos;
 static GLuint bubbleVBO = 0;
@@ -492,7 +501,7 @@ static void updateBubbles(float dt) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, bubblePos.size()*sizeof(glm::vec3), bubblePos.data());
 }
 
-// ------------------------- Main -------------------------
+// ========================= Main =========================
 int main() {
     if (!glfwInit()) { std::cerr<<"GLFW init failed\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);
@@ -513,6 +522,8 @@ int main() {
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    ensureSceneTex();
 
     // Load shaders
     std::string vs_basic = loadFile("shaders/basic.vert");
@@ -560,9 +571,9 @@ int main() {
     rockMesh  = makeRockDome();
 
     // Species init
-    initSpecies(minis,   N_MINIS,   /*color*/ {0.2f,0.7f,0.9f}, {0.2f,0.2f,0.2f}, {1.1f,0.7f,0.8f}, {0.2f,0.15f,0.15f}, 0.55f,1.0f, -0.5f, waterY-0.1f);
-    initSpecies(darters, N_DARTERS, /*color*/ {0.95f,0.55f,0.25f}, {0.3f,0.25f,0.25f}, {1.3f,0.9f,1.0f}, {0.25f,0.1f,0.2f}, 0.8f,1.6f, -0.5f, waterY-0.07f);
-    initSpecies(loaches, N_LOACHES, /*color*/ {0.55f,0.65f,0.35f}, {0.25f,0.25f,0.2f}, {1.2f,0.5f,0.9f}, {0.2f,0.1f,0.15f}, 0.4f,0.9f, -0.86f, -0.55f);
+    initSpecies(minis,   N_MINIS,   {0.2f,0.7f,0.9f},    {0.2f,0.2f,0.2f}, {1.1f,0.7f,0.8f}, {0.2f,0.15f,0.15f}, 0.55f,1.0f, -0.5f, waterY-0.1f);
+    initSpecies(darters, N_DARTERS, {0.95f,0.55f,0.25f}, {0.3f,0.25f,0.25f}, {1.3f,0.9f,1.0f}, {0.25f,0.1f,0.2f}, 0.8f,1.6f, -0.5f, waterY-0.07f);
+    initSpecies(loaches, N_LOACHES, {0.55f,0.65f,0.35f}, {0.25f,0.25f,0.2f}, {1.2f,0.5f,0.9f}, {0.2f,0.1f,0.15f}, 0.4f,0.9f, -0.86f, -0.55f);
 
     setupFishInstancing(vboMinis,   fishMesh, N_MINIS);
     setupFishInstancing(vboDarters, fishMesh, N_DARTERS);
@@ -589,7 +600,7 @@ int main() {
         updateLoaches(dt);
         updateBubbles(dt);
 
-        // upload plant instance data
+        // upload plant instances
         {
             std::vector<float> data; data.resize(N_PLANTS*8);
             for (int i=0;i<N_PLANTS;++i) {
@@ -604,7 +615,7 @@ int main() {
             glBindVertexArray(0);
         }
 
-        // upload fish per species
+        // upload fish instances
         auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo){
             std::vector<float> inst; inst.resize(species.size()*14);
             for (size_t i=0;i<species.size();++i) {
@@ -632,7 +643,7 @@ int main() {
         glm::mat4 proj = glm::perspective(glm::radians(60.0f),(float)SCR_W/(float)SCR_H,0.05f,100.0f);
         glm::mat4 view = glm::lookAt(camPos, camPos+camFront, camUp);
 
-        // ---------- OPAQUE: FLOOR ----------
+        // ====================== OPAQUE: FLOOR ======================
         glUseProgram(progBasic);
         glUniformMatrix4fv(uLoc(progBasic, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progBasic, "uView"),1,GL_FALSE,glm::value_ptr(view));
@@ -645,11 +656,11 @@ int main() {
         glUniform1f(uLoc(progBasic, "uFogFar"),   fogFar);
         glUniform1f(uLoc(progBasic, "uTime"),     now);
         glUniform1i(uLoc(progBasic, "uApplyCaustics"), 1);
-        glUniform1f(uLoc(progBasic, "uAlpha"), 1.0f); // fully opaque
+        glUniform1f(uLoc(progBasic, "uAlpha"), 1.0f);
         glBindVertexArray(floorMesh.vao);
         glDrawElements(GL_TRIANGLES, floorMesh.idxCount, GL_UNSIGNED_INT, 0);
 
-        // ---------- OPAQUE: ROCKS ----------
+        // ====================== OPAQUE: ROCKS ======================
         glUniform1i(uLoc(progBasic, "uApplyCaustics"), 0);
         glUniform1f(uLoc(progBasic, "uAlpha"), 1.0f);
         for (int i=0;i<N_ROCKS;++i) {
@@ -662,7 +673,7 @@ int main() {
             glDrawElements(GL_TRIANGLES, rockMesh.idxCount, GL_UNSIGNED_INT, 0);
         }
 
-        // ---------- OPAQUE: PLANTS ----------
+        // ====================== OPAQUE: PLANTS ======================
         glUseProgram(progPlant);
         glUniformMatrix4fv(uLoc(progPlant, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progPlant, "uView"),1,GL_FALSE,glm::value_ptr(view));
@@ -673,6 +684,7 @@ int main() {
         glUniform1f(uLoc(progPlant, "uFogNear"),  fogNear);
         glUniform1f(uLoc(progPlant, "uFogFar"),   fogFar);
         glBindVertexArray(plantMesh.vao);
+        // attach instance attributes for this VAO
         glBindBuffer(GL_ARRAY_BUFFER, plantVBO);
         glEnableVertexAttribArray(8);  glVertexAttribPointer(8,3,GL_FLOAT,GL_FALSE,sizeof(float)*8,(void*)0);                 glVertexAttribDivisor(8,1);
         glEnableVertexAttribArray(9);  glVertexAttribPointer(9,2,GL_FLOAT,GL_FALSE,sizeof(float)*8,(void*)(sizeof(float)*3));  glVertexAttribDivisor(9,1);
@@ -680,7 +692,7 @@ int main() {
         glDrawElementsInstanced(GL_TRIANGLES, plantMesh.idxCount, GL_UNSIGNED_INT, 0, N_PLANTS);
         glBindVertexArray(0);
 
-        // ---------- OPAQUE: FISH (three species) ----------
+        // ====================== OPAQUE: FISH ======================
         auto drawSpecies = [&](const std::vector<FishInst>& v, GLuint vbo){
             glBindVertexArray(fishMesh.vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -700,14 +712,18 @@ int main() {
         drawSpecies(darters, vboDarters);
         drawSpecies(loaches, vboLoaches);
 
-        // ---------- ALPHA: BUBBLES ----------
+        // ---- Copy opaque scene for water refraction ----
+        glBindTexture(GL_TEXTURE_2D, gSceneTex);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, SCR_W, SCR_H);
+
+        // ====================== ALPHA: BUBBLES ======================
         glUseProgram(progBub);
         glUniformMatrix4fv(uLoc(progBub, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progBub, "uView"),1,GL_FALSE,glm::value_ptr(view));
         glBindVertexArray(bubbleVAO);
         glDrawArrays(GL_POINTS, 0, N_BUB);
 
-        // ---------- ALPHA: WATER ----------
+        // ====================== ALPHA: WATER (refractive) ======================
         glUseProgram(progWater);
         glUniformMatrix4fv(uLoc(progWater, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progWater, "uView"),1,GL_FALSE,glm::value_ptr(view));
@@ -715,12 +731,17 @@ int main() {
         glUniform1f(uLoc(progWater, "uTime"), now);
         glUniform3f(uLoc(progWater, "uDeepColor"),    0.0f, 0.25f, 0.45f);
         glUniform3f(uLoc(progWater, "uShallowColor"), 0.1f, 0.6f,  0.8f);
+        glUniform3f(uLoc(progWater, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
+        glUniform3f(uLoc(progWater, "uViewPos"), camPos.x,camPos.y,camPos.z);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, gSceneTex);
+        glUniform1i(uLoc(progWater, "uSceneColor"), 0);
         glBindVertexArray(waterMesh.vao);
         glDisable(GL_CULL_FACE);
         glDrawElements(GL_TRIANGLES, waterMesh.idxCount, GL_UNSIGNED_INT, 0);
         glEnable(GL_CULL_FACE);
 
-        // ---------- GLASS TANK LAST (translucent) ----------
+        // ====================== GLASS TANK LAST (translucent) ======================
         glUseProgram(progBasic);
         glUniformMatrix4fv(uLoc(progBasic, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progBasic, "uView"),1,GL_FALSE,glm::value_ptr(view));

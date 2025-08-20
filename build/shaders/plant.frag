@@ -21,11 +21,14 @@ void main() {
     vec3 V = normalize(uViewPos - vWorldPos);
     vec3 R = reflect(-L, N);
 
-    float diff = max(dot(N,L), 0.0);
-    float spec = pow(max(dot(R,V),0.0), 16.0) * 0.1;
+    float ndl = max(dot(N,L), 0.0);
+    float spec = pow(max(dot(R,V),0.0), 16.0) * 0.12;
+
+    // Translucency when back-lit (fake subsurface for thin leaves)
+    float trans = pow(max(dot(-N, L), 0.0), 1.5) * 0.6;
 
     vec3 base = vColor;
-    vec3 lit = base * (0.25 + 0.75*diff) + vec3(spec)*0.4;
+    vec3 lit = base * (0.15 + 0.85*ndl) + spec + base * trans;
 
     float d = distance(uViewPos, vWorldPos);
     float f = fogFactor(d);
