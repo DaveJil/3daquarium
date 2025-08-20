@@ -28,22 +28,59 @@ static bool firstMouse = true;
 static double lastX = SCR_W * 0.5, lastY = SCR_H * 0.5;
 static bool wireframe = false;
 
-// ================ Screen copy texture (for water refraction) ================
-static GLuint gSceneTex = 0;
-static void ensureSceneTex() {
-    if (!gSceneTex) glGenTextures(1, &gSceneTex);
-    glBindTexture(GL_TEXTURE_2D, gSceneTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SCR_W, SCR_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+// ========================= HDR Framebuffer (linear workflow) =========================
+// We render everything into an FP16 color target, then tonemap to the window (sRGB).
+static GLuint hdrFBO = 0;
+static GLuint hdrColorTex = 0;     // RGBA16F: scene color (linear HDR)
+static GLuint hdrDepthRBO = 0;     // Depth (24) + Stencil (8) is fine
+static GLuint opaqueCopyTex = 0;   // RGBA16F: copy of opaque scene for water refraction
+
+static void createOrResizeHDR() {
+    if (!hdrFBO) glGenFramebuffers(1, &hdrFBO);
+    if (!hdrColorTex) glGenTextures(1, &hdrColorTex);
+    if (!opaqueCopyTex) glGenTextures(1, &opaqueCopyTex);
+    if (!hdrDepthRBO) glGenRenderbuffers(1, &hdrDepthRBO);
+
+    // hdrColorTex
+    glBindTexture(GL_TEXTURE_2D, hdrColorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, SCR_W, SCR_H, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // opaqueCopyTex (same size/format)
+    glBindTexture(GL_TEXTURE_2D, opaqueCopyTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, SCR_W, SCR_H, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // depth RBO
+    glBindRenderbuffer(GL_RENDERBUFFER, hdrDepthRBO);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCR_W, SCR_H);
+
+    // attach to FBO
+    glBindFramebuffer(GL_FRAMEBUFFER, hdrFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hdrColorTex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, hdrDepthRBO);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "HDR FBO incomplete! status=" << std::hex << status << std::dec << "\n";
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+// Screen-triangle VAO for the tonemap pass (no VBO needed)
+static GLuint screenVAO = 0;
+
+// ========================= Callbacks =========================
 static void framebuffer_size_callback(GLFWwindow*, int w, int h) {
     SCR_W = w; SCR_H = h;
     glViewport(0, 0, w, h);
-    ensureSceneTex();
+    createOrResizeHDR();
 }
 static void mouse_callback(GLFWwindow*, double xpos, double ypos) {
     if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
@@ -517,13 +554,17 @@ int main() {
     glfwSetCursorPosCallback(win, mouse_callback);
     glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
+    // GL state
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_FRAMEBUFFER_SRGB); // window expects sRGB; tonemap shader outputs linear
 
-    ensureSceneTex();
+    // HDR buffers + screen triangle VAO
+    createOrResizeHDR();
+    glGenVertexArrays(1, &screenVAO);
 
     // Load shaders
     std::string vs_basic = loadFile("shaders/basic.vert");
@@ -536,6 +577,8 @@ int main() {
     std::string fs_bub   = loadFile("shaders/bubbles.frag");
     std::string vs_plant = loadFile("shaders/plant.vert");
     std::string fs_plant = loadFile("shaders/plant.frag");
+    std::string vs_tone  = loadFile("shaders/tonemap.vert");
+    std::string fs_tone  = loadFile("shaders/tonemap.frag");
 
     GLuint progBasic = linkProgram(
         compileShader(GL_VERTEX_SHADER,   vs_basic.c_str(), "basic.vert"),
@@ -562,6 +605,11 @@ int main() {
         compileShader(GL_FRAGMENT_SHADER, fs_plant.c_str(), "plant.frag"),
         "progPlant");
 
+    GLuint progTone = linkProgram(
+        compileShader(GL_VERTEX_SHADER,   vs_tone.c_str(), "tonemap.vert"),
+        compileShader(GL_FRAGMENT_SHADER, fs_tone.c_str(), "tonemap.frag"),
+        "progTonemap");
+
     // Geometry
     tankMesh  = makeBox(3.5f, 2.1f, 1.8f);
     floorMesh = makeFloor();
@@ -570,9 +618,10 @@ int main() {
     plantMesh = makePlantStrip();
     rockMesh  = makeRockDome();
 
-    // Species init
-    initSpecies(minis,   N_MINIS,   {0.2f,0.7f,0.9f},    {0.2f,0.2f,0.2f}, {1.1f,0.7f,0.8f}, {0.2f,0.15f,0.15f}, 0.55f,1.0f, -0.5f, waterY-0.1f);
-    initSpecies(darters, N_DARTERS, {0.95f,0.55f,0.25f}, {0.3f,0.25f,0.25f}, {1.3f,0.9f,1.0f}, {0.25f,0.1f,0.2f}, 0.8f,1.6f, -0.5f, waterY-0.07f);
+    // Species init (colors are placeholders; Step 2 will texture these)
+    auto initSpecies = ::initSpecies;
+    initSpecies(minis,   N_MINIS,   {0.2f,0.7f,0.9f},    {0.2f,0.2f,0.2f}, {1.1f,0.7f,0.8f}, {0.2f,0.15f,0.15f}, 0.55f,1.0f, -0.5f,  waterY-0.1f);
+    initSpecies(darters, N_DARTERS, {0.95f,0.55f,0.25f}, {0.3f,0.25f,0.25f}, {1.3f,0.9f,1.0f}, {0.25f,0.1f,0.2f}, 0.8f,1.6f, -0.5f,  waterY-0.07f);
     initSpecies(loaches, N_LOACHES, {0.55f,0.65f,0.35f}, {0.25f,0.25f,0.2f}, {1.2f,0.5f,0.9f}, {0.2f,0.1f,0.15f}, 0.4f,0.9f, -0.86f, -0.55f);
 
     setupFishInstancing(vboMinis,   fishMesh, N_MINIS);
@@ -587,6 +636,9 @@ int main() {
     glm::vec3 fogColor(0.02f,0.06f,0.09f);
     float fogNear = 1.5f, fogFar = 9.0f;
 
+    // Tonemap exposure (tweakable)
+    float exposure = 1.25f;
+
     float last = (float)glfwGetTime();
     while (!glfwWindowShouldClose(win)) {
         float now=(float)glfwGetTime(), dt=now-last; last=now;
@@ -595,49 +647,16 @@ int main() {
         if (glfwGetKey(win, GLFW_KEY_F1)==GLFW_PRESS){ wireframe=!wireframe; glPolygonMode(GL_FRONT_AND_BACK, wireframe?GL_LINE:GL_FILL); }
         process_input(win, dt);
 
+        // Updates
         updateMinis(dt);
         updateDarters(dt);
         updateLoaches(dt);
         updateBubbles(dt);
 
-        // upload plant instances
-        {
-            std::vector<float> data; data.resize(N_PLANTS*8);
-            for (int i=0;i<N_PLANTS;++i) {
-                int o=i*8;
-                data[o+0]=plantPos[i].x; data[o+1]=plantPos[i].y; data[o+2]=plantPos[i].z;
-                data[o+3]=plantHP[i].x;  data[o+4]=plantHP[i].y;
-                data[o+5]=plantColor[i].r; data[o+6]=plantColor[i].g; data[o+7]=plantColor[i].b;
-            }
-            glBindVertexArray(plantVAO);
-            glBindBuffer(GL_ARRAY_BUFFER, plantVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, data.size()*sizeof(float), data.data());
-            glBindVertexArray(0);
-        }
-
-        // upload fish instances
-        auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo){
-            std::vector<float> inst; inst.resize(species.size()*14);
-            for (size_t i=0;i<species.size();++i) {
-                const auto &f = species[i];
-                glm::vec3 dir = glm::length(f.vel)>1e-6f ? glm::normalize(f.vel) : glm::vec3(0,0,-1);
-                size_t o = i*14;
-                inst[o+0]=f.pos.x; inst[o+1]=f.pos.y; inst[o+2]=f.pos.z;
-                inst[o+3]=dir.x;   inst[o+4]=dir.y;   inst[o+5]=dir.z;
-                inst[o+6]=f.phase; inst[o+7]=f.scale;
-                inst[o+8]=f.stretch.x; inst[o+9]=f.stretch.y; inst[o+10]=f.stretch.z;
-                inst[o+11]=f.color.r;  inst[o+12]=f.color.g;  inst[o+13]=f.color.b;
-            }
-            glBindVertexArray(fishMesh.vao);
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, inst.size()*sizeof(float), inst.data());
-            glBindVertexArray(0);
-        };
-        uploadFish(minis, vboMinis);
-        uploadFish(darters, vboDarters);
-        uploadFish(loaches, vboLoaches);
-
-        glClearColor(fogColor.r, fogColor.g, fogColor.b, 1.0f);
+        // ------------------- Render to HDR FBO (linear) -------------------
+        glBindFramebuffer(GL_FRAMEBUFFER, hdrFBO);
+        glViewport(0, 0, SCR_W, SCR_H);
+        glClearColor(fogColor.r, fogColor.g, fogColor.b, 1.0f); // linear fog color
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 proj = glm::perspective(glm::radians(60.0f),(float)SCR_W/(float)SCR_H,0.05f,100.0f);
@@ -693,6 +712,27 @@ int main() {
         glBindVertexArray(0);
 
         // ====================== OPAQUE: FISH ======================
+        auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo){
+            std::vector<float> inst; inst.resize(species.size()*14);
+            for (size_t i=0;i<species.size();++i) {
+                const auto &f = species[i];
+                glm::vec3 dir = glm::length(f.vel)>1e-6f ? glm::normalize(f.vel) : glm::vec3(0,0,-1);
+                size_t o = i*14;
+                inst[o+0]=f.pos.x; inst[o+1]=f.pos.y; inst[o+2]=f.pos.z;
+                inst[o+3]=dir.x;   inst[o+4]=dir.y;   inst[o+5]=dir.z;
+                inst[o+6]=f.phase; inst[o+7]=f.scale;
+                inst[o+8]=f.stretch.x; inst[o+9]=f.stretch.y; inst[o+10]=f.stretch.z;
+                inst[o+11]=f.color.r;  inst[o+12]=f.color.g;  inst[o+13]=f.color.b;
+            }
+            glBindVertexArray(fishMesh.vao);
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, inst.size()*sizeof(float), inst.data());
+            glBindVertexArray(0);
+        };
+        uploadFish(minis,   vboMinis);
+        uploadFish(darters, vboDarters);
+        uploadFish(loaches, vboLoaches);
+
         auto drawSpecies = [&](const std::vector<FishInst>& v, GLuint vbo){
             glBindVertexArray(fishMesh.vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -712,9 +752,11 @@ int main() {
         drawSpecies(darters, vboDarters);
         drawSpecies(loaches, vboLoaches);
 
-        // ---- Copy opaque scene for water refraction ----
-        glBindTexture(GL_TEXTURE_2D, gSceneTex);
+        // ---- Copy opaque HDR scene for water refraction ----
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, hdrFBO);
+        glBindTexture(GL_TEXTURE_2D, opaqueCopyTex);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, SCR_W, SCR_H);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
         // ====================== ALPHA: BUBBLES ======================
         glUseProgram(progBub);
@@ -734,7 +776,7 @@ int main() {
         glUniform3f(uLoc(progWater, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
         glUniform3f(uLoc(progWater, "uViewPos"), camPos.x,camPos.y,camPos.z);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, gSceneTex);
+        glBindTexture(GL_TEXTURE_2D, opaqueCopyTex);           // opaque HDR scene for refraction
         glUniform1i(uLoc(progWater, "uSceneColor"), 0);
         glBindVertexArray(waterMesh.vao);
         glDisable(GL_CULL_FACE);
@@ -759,6 +801,19 @@ int main() {
         glBindVertexArray(tankMesh.vao);
         glDrawElements(GL_TRIANGLES, tankMesh.idxCount, GL_UNSIGNED_INT, 0);
         glDepthMask(GL_TRUE);
+
+        // ------------------- Tonemap to the default framebuffer (sRGB) -------------------
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, SCR_W, SCR_H);
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(progTone);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, hdrColorTex);
+        glUniform1i(uLoc(progTone, "uHDR"), 0);
+        glUniform1f(uLoc(progTone, "uExposure"), exposure);
+        glBindVertexArray(screenVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glEnable(GL_DEPTH_TEST);
 
         glfwSwapBuffers(win);
     }
