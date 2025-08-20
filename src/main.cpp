@@ -8,7 +8,7 @@
   #define GL_SILENCE_DEPRECATION
   #include <OpenGL/gl3.h>
 #else
-  #error "This setup is macOS-only. For Windows/Linux, use GLAD/GLEW."
+  #error "This setup targets macOS OpenGL 4.1 core profile."
 #endif
 #include <GLFW/glfw3.h>
 
@@ -16,7 +16,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// ========================= Window & Camera =========================
+// ===========================================================
+// Window/camera
+// ===========================================================
 static int SCR_W = 1280, SCR_H = 720;
 
 static float camYaw = -90.0f, camPitch = -5.0f;
@@ -27,11 +29,11 @@ static bool firstMouse = true;
 static double lastX = SCR_W * 0.5, lastY = SCR_H * 0.5;
 static bool wireframe = false;
 
-// ========================= HDR Framebuffer =========================
-static GLuint hdrFBO = 0;
-static GLuint hdrColorTex = 0;     // RGBA16F
-static GLuint hdrDepthRBO = 0;     // DEPTH24_STENCIL8
-static GLuint opaqueCopyTex = 0;   // RGBA16F
+// ===========================================================
+// HDR render targets & screen triangle
+// ===========================================================
+static GLuint hdrFBO = 0, hdrColorTex = 0, hdrDepthRBO = 0, opaqueCopyTex = 0;
+static GLuint screenVAO = 0;
 
 static void createOrResizeHDR() {
     if (!hdrFBO) glGenFramebuffers(1, &hdrFBO);
@@ -65,20 +67,18 @@ static void createOrResizeHDR() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-// Screen-triangle VAO for tonemap pass
-static GLuint screenVAO = 0;
-
-// ========================= Callbacks =========================
+// ===========================================================
+// Input
+// ===========================================================
 static void framebuffer_size_callback(GLFWwindow*, int w, int h) {
-    // w,h are FRAMEBUFFER pixels (Retina aware)
     SCR_W = w; SCR_H = h;
     glViewport(0, 0, SCR_W, SCR_H);
     createOrResizeHDR();
 }
 static void mouse_callback(GLFWwindow*, double xpos, double ypos) {
     if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
-    float xoffset = (float)(xpos - lastX);
-    float yoffset = (float)(lastY - ypos);
+    float xoffset = float(xpos - lastX);
+    float yoffset = float(lastY - ypos);
     lastX = xpos; lastY = ypos;
     float sensitivity = 0.12f;
     xoffset *= sensitivity; yoffset *= sensitivity;
@@ -101,7 +101,9 @@ static void process_input(GLFWwindow* win, float dt) {
     if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) camPos.y += vel;
 }
 
-// ========================= Utilities =========================
+// ===========================================================
+// Utils
+// ===========================================================
 static GLuint compileShader(GLenum type, const char* src, const char* name) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -135,7 +137,9 @@ static std::string loadFile(const char* path) {
     return s;
 }
 
-// ========================= Geometry Helpers =========================
+// ===========================================================
+// Geometry
+// ===========================================================
 struct Mesh { GLuint vao=0, vbo=0, ebo=0; GLsizei idxCount=0; };
 
 static Mesh makeBox(float w, float h, float d) {
@@ -152,7 +156,7 @@ static Mesh makeBox(float w, float h, float d) {
     addQuad({ x,-y,-z},{-x,-y,-z},{-x, y,-z},{ x, y,-z}, { 0, 0, 1});
     addQuad({-x,-y,-z},{-x,-y, z},{-x, y, z},{-x, y,-z}, { 1, 0, 0});
     addQuad({ x,-y, z},{ x,-y,-z},{ x, y,-z},{ x, y, z}, {-1, 0, 0});
-    addQuad({-x, y, z},{ x, y, z},{ x, y,-z},{-x, y,-z}, { 0,-1, 0}); // ceiling
+    addQuad({-x, y, z},{ x, y, z},{ x, y,-z},{-x, y,-z}, { 0,-1, 0});
     Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
     glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
     glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
@@ -164,7 +168,6 @@ static Mesh makeBox(float w, float h, float d) {
     glBindVertexArray(0);
     return m;
 }
-
 static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.2f, float sz=1.8f, float y=0.45f) {
     struct V { glm::vec3 p; glm::vec2 uv; };
     std::vector<V> v; v.reserve((nx+1)*(nz+1));
@@ -185,10 +188,8 @@ static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.2f, float sz=1.8f,
     glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
     glEnableVertexAttribArray(2); glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,uv));
     m.idxCount=(GLsizei)idx.size();
-    glBindVertexArray(0);
-    return m;
+    glBindVertexArray(0); return m;
 }
-
 static Mesh makeFloor(float sx=3.2f, float sz=1.8f, float y=-0.9f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v = {
@@ -206,25 +207,18 @@ static Mesh makeFloor(float sx=3.2f, float sz=1.8f, float y=-0.9f) {
     glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
     glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
     m.idxCount=(GLsizei)i.size();
-    glBindVertexArray(0);
-    return m;
+    glBindVertexArray(0); return m;
 }
-
 static Mesh makeFishMesh() {
     struct V { glm::vec3 p,n; };
     std::vector<V> v; std::vector<unsigned> idx;
-
     auto push = [&](const glm::vec3& p, const glm::vec3& n){ v.push_back({p, glm::normalize(n)}); };
 
-    const int   segX = 24;
-    const int   segR = 20;
-    const float rMax = 0.065f;
-    const float zFlatten = 0.65f;
-
+    const int segX=24, segR=20;
+    const float rMax=0.065f, zFlatten=0.65f;
     for (int i=0; i<=segX; ++i) {
         float t = (float)i / (float)segX;
-        float tClamped = std::clamp(t*1.02f, 0.0f, 1.0f);
-        float r = rMax * std::pow(std::sin(3.14159f * tClamped), 0.75f);
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.02f, 0.0f, 1.0f)), 0.75f);
         if (i == 0) r *= 0.6f;
         for (int j=0; j<=segR; ++j) {
             float a = (2.0f * 3.14159f) * (float)j / (float)segR;
@@ -239,15 +233,13 @@ static Mesh makeFishMesh() {
         unsigned a = i*ring + j, b=a+1, c=(i+1)*ring + j, d=c+1;
         idx.insert(idx.end(), {a,c,b, b,c,d});
     }
-    // nose cap
-    {
+    {   // nose
         glm::vec3 nose = {0.0f, 0.0f, 0.0f};
         unsigned baseCenter = (unsigned)v.size();
         v.push_back({nose, glm::vec3(-1,0,0)});
         for (int j=0; j<segR; ++j) { unsigned a=j, b=j+1; idx.insert(idx.end(), {baseCenter, b, a}); }
     }
-    // tail fin (two-sided)
-    {
+    {   // tail fin (two-sided)
         float x = 1.05f;
         glm::vec3 tU = {x,  0.15f,  0.0f}, tD = {x, -0.15f,  0.0f};
         glm::vec3 baseL = {1.0f,  0.04f,  0.02f}, baseR = {1.0f, -0.04f,  0.02f};
@@ -266,11 +258,9 @@ static Mesh makeFishMesh() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
     glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
     glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
-    m.idxCount = (GLsizei)idx.size();
-    glBindVertexArray(0);
-    return m;
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
 }
-
 static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width = 0.027f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v;
@@ -294,10 +284,8 @@ static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width =
     glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
     glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
     m.idxCount=(GLsizei)idx.size();
-    glBindVertexArray(0);
-    return m;
+    glBindVertexArray(0); return m;
 }
-
 static Mesh makeRockDome(int rings=12, int sectors=18, float radius=0.22f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v; std::vector<unsigned> idx;
@@ -327,13 +315,13 @@ static Mesh makeRockDome(int rings=12, int sectors=18, float radius=0.22f) {
     glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
     glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
     m.idxCount=(GLsizei)idx.size();
-    glBindVertexArray(0);
-    return m;
+    glBindVertexArray(0); return m;
 }
 
-// ========================= Species & Instances =========================
+// ===========================================================
+// Species/instances
+// ===========================================================
 enum Species : int { CLOWNFISH=0, NEON_TETRA=1, ZEBRA_DANIO=2 };
-
 struct FishInst {
     glm::vec3 pos, vel;
     float phase;
@@ -342,21 +330,16 @@ struct FishInst {
     glm::vec3 color;
     float species;
 };
-
 static std::vector<FishInst> clownfish, neon, danio;
 static GLuint vboClown=0, vboNeon=0, vboDanio=0;
 
 static Mesh fishMesh, plantMesh, tankMesh, floorMesh, waterMesh, rockMesh;
-
 static const glm::vec3 TANK_EXTENTS = {3.5f*0.5f - 0.05f, 0.95f, 1.8f*0.5f - 0.05f};
 static float waterY = 0.45f;
 
-static int N_CLOWN = 10;
-static int N_NEON  = 20;
-static int N_DANIO = 15;
+static int N_CLOWN = 10, N_NEON = 20, N_DANIO = 15;
+static int N_PLANTS = 60, N_ROCKS = 8;
 
-static int N_PLANTS = 60;
-static int N_ROCKS  = 8;
 static GLuint plantVBO=0;
 static std::vector<glm::vec3> plantPos;
 static std::vector<glm::vec2> plantHP;
@@ -386,7 +369,6 @@ static void initSpeciesVec(std::vector<FishInst>& v, int count, Species s,
         v[i] = { p, dir*sp, urand01(rng)*6.28318f, sc, stretch, col, (float)s };
     }
 }
-
 static void initPlantsAndRocks() {
     plantPos.resize(N_PLANTS);
     plantHP.resize(N_PLANTS);
@@ -411,7 +393,6 @@ static void initPlantsAndRocks() {
         rocks[i] = glm::vec4(x, -0.9f, z, r);
     }
 }
-
 static void setupFishInstancing(GLuint &instVBO, const Mesh& m, int count) {
     if (!instVBO) glGenBuffers(1, &instVBO);
     glBindVertexArray(m.vao);
@@ -426,38 +407,12 @@ static void setupFishInstancing(GLuint &instVBO, const Mesh& m, int count) {
     glBindVertexArray(0);
 }
 
-static void updateSchool(std::vector<FishInst>& fish, float dt, float yMin, float yMax, float maxSpeed, float cohesion=0.18f, float alignW=0.45f) {
-    const float neighborDist2 = 0.18f;
-    const float avoidDist2    = 0.06f;
-    for (auto &f : fish) {
-        glm::vec3 pos=f.pos, vel=f.vel;
-        glm::vec3 align(0), coh(0), sep(0); int count = 0;
-        for (auto &o : fish) {
-            if (&o==&f) continue;
-            glm::vec3 d = o.pos - pos; float d2 = glm::dot(d,d);
-            if (d2 < neighborDist2) {
-                align += o.vel; coh += o.pos; ++count;
-                if (d2 < avoidDist2) sep -= d * (0.2f / std::max(d2, 1e-4f));
-            }
-        }
-        if (count>0) { align = glm::normalize(align/(float)count) * 0.6f; coh = (coh/(float)count) - pos; }
-        glm::vec3 steer(0); glm::vec3 lim=TANK_EXTENTS;
-        if (pos.x> lim.x) steer.x -= (pos.x-lim.x)*2.2f; if (pos.x<-lim.x) steer.x += (-lim.x-pos.x)*2.2f;
-        if (pos.z> lim.z) steer.z -= (pos.z-lim.z)*2.2f; if (pos.z<-lim.z) steer.z += (-lim.z-pos.z)*2.2f;
-        if (pos.y> yMax)  steer.y -= (pos.y-yMax)*3.2f; if (pos.y< yMin)  steer.y += (yMin-pos.y)*3.2f;
-        glm::vec3 drift(std::sin(f.phase*0.7f)*0.1f, std::sin(f.phase*1.3f)*0.05f, std::cos(f.phase*0.9f)*0.1f);
-        glm::vec3 jitter(urand(rng)*0.12f, urand(rng)*0.06f, urand(rng)*0.12f);
-        vel += align*alignW + coh*cohesion + sep*1.15f + steer*1.2f + drift*0.3f + jitter*0.25f;
-        float s=glm::length(vel); if (s>maxSpeed) vel*= (maxSpeed/s);
-        pos += vel*dt; f.pos=pos; f.vel=vel; f.phase += dt*3.0f;
-    }
-}
-
-// ========================= Bubbles =========================
+// ===========================================================
+// Bubbles
+// ===========================================================
 static const int N_BUB = 120;
 static std::vector<glm::vec3> bubblePos;
-static GLuint bubbleVBO = 0;
-static GLuint bubbleVAO = 0;
+static GLuint bubbleVBO = 0, bubbleVAO = 0;
 
 static void initBubbles() {
     bubblePos.resize(N_BUB);
@@ -490,15 +445,159 @@ static void updateBubbles(float dt) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, bubblePos.size()*sizeof(glm::vec3), bubblePos.data());
 }
 
-// ========================= Main =========================
-int main() {
+// ===========================================================
+// IBL resources
+// ===========================================================
+static GLuint envCube=0, irrCube=0, prefilterCube=0, brdfLUT=0;
+static GLuint fbo=0, rbo=0;
+static int prefilterMaxMip = 0;
+
+// Programs
+static GLuint progBasic=0, progWater=0, progFish=0, progBub=0, progPlant=0, progTone=0;
+static GLuint progIBLGen=0, progIBLDiff=0, progIBLSpec=0, progBRDF=0;
+
+// uniforms helper
+static GLint u(GLuint p, const char* n){ return glGetUniformLocation(p, n); }
+
+// Render a screen triangle
+static void drawScreenTriangle(){ glBindVertexArray(screenVAO); glDrawArrays(GL_TRIANGLES, 0, 3); }
+
+// Create cubemap texture helper
+static GLuint createCube(GLenum internal, int size, bool mipmap) {
+    GLuint tex; glGenTextures(1,&tex);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+    for (int f=0; f<6; ++f)
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X+f, 0, internal, size, size, 0, GL_RGBA, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, mipmap?GL_LINEAR_MIPMAP_LINEAR:GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    if (mipmap) glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    return tex;
+}
+
+static void ensureIBLTargets(){
+    if (!fbo) glGenFramebuffers(1,&fbo);
+    if (!rbo) glGenRenderbuffers(1,&rbo);
+}
+
+// Generate procedural HDR environment -> envCube
+static void generateEnvCube(int size) {
+    ensureIBLTargets();
+    if (envCube) glDeleteTextures(1,&envCube);
+    envCube = createCube(GL_RGBA16F, size, false);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, size, size);
+
+    glUseProgram(progIBLGen);
+    glUniform1f(u(progIBLGen,"uFaceSize"), (float)size);
+
+    for (int face=0; face<6; ++face){
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X+face, envCube, 0);
+        glViewport(0,0,size,size);
+        glUniform1i(u(progIBLGen,"uFace"), face);
+        drawScreenTriangle();
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// Convolve env -> irradiance cubemap (Lambert)
+static void generateIrradiance(int size) {
+    ensureIBLTargets();
+    if (irrCube) glDeleteTextures(1,&irrCube);
+    irrCube = createCube(GL_RGBA16F, size, false);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, size, size);
+
+    glUseProgram(progIBLDiff);
+    glUniform1f(u(progIBLDiff,"uFaceSize"), (float)size);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_CUBE_MAP, envCube);
+    glUniform1i(u(progIBLDiff,"uEnv"), 0);
+
+    for (int face=0; face<6; ++face){
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X+face, irrCube, 0);
+        glViewport(0,0,size,size);
+        glUniform1i(u(progIBLDiff,"uFace"), face);
+        drawScreenTriangle();
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// Prefilter env -> specular prefilter cube mip chain
+static void generatePrefilter(int baseSize) {
+    ensureIBLTargets();
+    if (prefilterCube) glDeleteTextures(1,&prefilterCube);
+    prefilterCube = createCube(GL_RGBA16F, baseSize, true);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterCube);
+    prefilterMaxMip = (int)std::floor(std::log2((float)baseSize));
+    for (int mip=1; mip<=prefilterMaxMip; ++mip) {
+        int sz = baseSize >> mip;
+        for (int f=0; f<6; ++f)
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X+f, mip, GL_RGBA16F, sz, sz, 0, GL_RGBA, GL_FLOAT, nullptr);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glUseProgram(progIBLSpec);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_CUBE_MAP, envCube);
+    glUniform1i(u(progIBLSpec,"uEnv"), 0);
+
+    for (int mip=0; mip<=prefilterMaxMip; ++mip){
+        int size = baseSize >> mip;
+        float rough = (float)mip / (float)prefilterMaxMip;
+        glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, size, size);
+        glViewport(0,0,size,size);
+        glUniform1f(u(progIBLSpec,"uFaceSize"), (float)size);
+        glUniform1f(u(progIBLSpec,"uRoughness"), rough);
+        for (int face=0; face<6; ++face){
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X+face, prefilterCube, mip);
+            glUniform1i(u(progIBLSpec,"uFace"), face);
+            drawScreenTriangle();
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// BRDF LUT 2D
+static void generateBRDF(int size) {
+    ensureIBLTargets();
+    if (!brdfLUT) glGenTextures(1,&brdfLUT);
+    glBindTexture(GL_TEXTURE_2D, brdfLUT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, size, size, 0, GL_RG, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, size, size);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, brdfLUT, 0);
+    glViewport(0,0,size,size);
+
+    glUseProgram(progBRDF);
+    glUniform1f(u(progBRDF,"uSize"), (float)size);
+    drawScreenTriangle();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// ===========================================================
+// Main
+// ===========================================================
+int main(){
     if (!glfwInit()) { std::cerr<<"GLFW init failed\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,1);
     glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE);
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT,GL_TRUE);
-    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GL_TRUE); // explicit
+    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GL_TRUE);
 #endif
     GLFWwindow* win = glfwCreateWindow(SCR_W,SCR_H,"AquariumGL",nullptr,nullptr);
     if (!win) { std::cerr<<"Window failed\n"; glfwTerminate(); return -1; }
@@ -507,10 +606,9 @@ int main() {
     glfwSetCursorPosCallback(win, mouse_callback);
     glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    // IMPORTANT: size everything to the REAL framebuffer (Retina)
     int fbw, fbh; glfwGetFramebufferSize(win, &fbw, &fbh);
     SCR_W = fbw; SCR_H = fbh;
-    glViewport(0, 0, SCR_W, SCR_H);
+    glViewport(0,0,SCR_W,SCR_H);
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -522,51 +620,46 @@ int main() {
     createOrResizeHDR();
     glGenVertexArrays(1, &screenVAO);
 
-    // Load shaders
-    std::string vs_basic = loadFile("shaders/basic.vert");
-    std::string fs_basic = loadFile("shaders/basic.frag");
-    std::string vs_water = loadFile("shaders/water.vert");
-    std::string fs_water = loadFile("shaders/water.frag");
-    std::string vs_fish  = loadFile("shaders/fish.vert");
-    std::string fs_fish  = loadFile("shaders/fish.frag");
-    std::string vs_bub   = loadFile("shaders/bubbles.vert");
-    std::string fs_bub   = loadFile("shaders/bubbles.frag");
-    std::string vs_plant = loadFile("shaders/plant.vert");
-    std::string fs_plant = loadFile("shaders/plant.frag");
-    std::string vs_tone  = loadFile("shaders/tonemap.vert");
-    std::string fs_tone  = loadFile("shaders/tonemap.frag");
+    // ---------- compile shaders ----------
+    auto S = [&](const char* p){ return loadFile(p); };
 
-    GLuint progBasic = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_basic.c_str(), "basic.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_basic.c_str(), "basic.frag"),
-        "progBasic");
+    GLuint vs_basic = compileShader(GL_VERTEX_SHADER,   S("shaders/basic.vert").c_str(),  "basic.vert");
+    GLuint fs_basic = compileShader(GL_FRAGMENT_SHADER, S("shaders/basic.frag").c_str(),  "basic.frag");
+    progBasic = linkProgram(vs_basic, fs_basic, "progBasic");
 
-    GLuint progWater = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_water.c_str(), "water.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_water.c_str(), "water.frag"),
-        "progWater");
+    GLuint vs_water = compileShader(GL_VERTEX_SHADER,   S("shaders/water.vert").c_str(),  "water.vert");
+    GLuint fs_water = compileShader(GL_FRAGMENT_SHADER, S("shaders/water.frag").c_str(),  "water.frag");
+    progWater = linkProgram(vs_water, fs_water, "progWater");
 
-    GLuint progFish = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_fish.c_str(), "fish.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_fish.c_str(), "fish.frag"),
-        "progFish");
+    GLuint vs_fish  = compileShader(GL_VERTEX_SHADER,   S("shaders/fish.vert").c_str(),   "fish.vert");
+    GLuint fs_fish  = compileShader(GL_FRAGMENT_SHADER, S("shaders/fish.frag").c_str(),   "fish.frag");
+    progFish = linkProgram(vs_fish, fs_fish, "progFish");
 
-    GLuint progBub = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_bub.c_str(), "bubbles.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_bub.c_str(), "bubbles.frag"),
-        "progBub");
+    GLuint vs_bub   = compileShader(GL_VERTEX_SHADER,   S("shaders/bubbles.vert").c_str(),"bubbles.vert");
+    GLuint fs_bub   = compileShader(GL_FRAGMENT_SHADER, S("shaders/bubbles.frag").c_str(),"bubbles.frag");
+    progBub = linkProgram(vs_bub, fs_bub, "progBub");
 
-    GLuint progPlant = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_plant.c_str(), "plant.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_plant.c_str(), "plant.frag"),
-        "progPlant");
+    GLuint vs_plant = compileShader(GL_VERTEX_SHADER,   S("shaders/plant.vert").c_str(),  "plant.vert");
+    GLuint fs_plant = compileShader(GL_FRAGMENT_SHADER, S("shaders/plant.frag").c_str(),  "plant.frag");
+    progPlant = linkProgram(vs_plant, fs_plant, "progPlant");
 
-    GLuint progTone = linkProgram(
-        compileShader(GL_VERTEX_SHADER,   vs_tone.c_str(), "tonemap.vert"),
-        compileShader(GL_FRAGMENT_SHADER, fs_tone.c_str(), "tonemap.frag"),
-        "progTonemap");
+    // Screen tri VS reused for IBL/tonemap
+    GLuint vs_tri = compileShader(GL_VERTEX_SHADER,     S("shaders/tonemap.vert").c_str(),"tonemap.vert");
 
-    // Geometry
+    GLuint fs_tone = compileShader(GL_FRAGMENT_SHADER,  S("shaders/tonemap.frag").c_str(),"tonemap.frag");
+    progTone = linkProgram(vs_tri, fs_tone, "progTonemap");
+
+    // IBL passes
+    GLuint fs_envGen  = compileShader(GL_FRAGMENT_SHADER, S("shaders/ibl_cubegen.frag").c_str(),  "ibl_cubegen.frag");
+    GLuint fs_diffuse = compileShader(GL_FRAGMENT_SHADER, S("shaders/ibl_diffuse.frag").c_str(),   "ibl_diffuse.frag");
+    GLuint fs_spec    = compileShader(GL_FRAGMENT_SHADER, S("shaders/ibl_specular.frag").c_str(),  "ibl_specular.frag");
+    GLuint fs_brdf    = compileShader(GL_FRAGMENT_SHADER, S("shaders/ibl_brdf_lut.frag").c_str(),  "ibl_brdf_lut.frag");
+    progIBLGen  = linkProgram(vs_tri, fs_envGen,  "progIBLGen");
+    progIBLDiff = linkProgram(vs_tri, fs_diffuse, "progIBLDiff");
+    progIBLSpec = linkProgram(vs_tri, fs_spec,    "progIBLSpec");
+    progBRDF    = linkProgram(vs_tri, fs_brdf,    "progBRDF");
+
+    // ---------- geometry ----------
     tankMesh  = makeBox(3.5f, 2.2f, 1.8f);
     floorMesh = makeFloor();
     waterMesh = makeWaterPlane();
@@ -574,18 +667,16 @@ int main() {
     plantMesh = makePlantStrip();
     rockMesh  = makeRockDome();
 
-    // Species init
+    // ---------- species ----------
     auto initSpeciesVec_ = ::initSpeciesVec;
     initSpeciesVec_(clownfish, N_CLOWN, CLOWNFISH,
                     {1.0f,0.55f,0.20f}, {0.2f,0.1f,0.1f},
                     {1.2f,0.9f,1.0f},   {0.25f,0.1f,0.2f},
                     0.6f,1.2f, -0.55f,  waterY-0.09f, 0.85f, 1.10f);
-
     initSpeciesVec_(neon, N_NEON, NEON_TETRA,
                     {0.20f,0.85f,1.0f}, {0.2f,0.2f,0.2f},
                     {1.0f,0.7f,0.8f},   {0.2f,0.15f,0.15f},
                     0.7f,1.6f, -0.5f,   waterY-0.07f, 0.55f, 0.75f);
-
     initSpeciesVec_(danio, N_DANIO, ZEBRA_DANIO,
                     {0.9f,0.85f,0.55f}, {0.2f,0.2f,0.2f},
                     {1.3f,0.8f,0.9f},   {0.25f,0.12f,0.2f},
@@ -598,7 +689,13 @@ int main() {
     initPlantsAndRocks();
     initBubbles();
 
-    auto uLoc = [&](GLuint p, const char* n){ return glGetUniformLocation(p, n); };
+    // ---------- IBL generation ----------
+    generateEnvCube(256);     // procedural HDR environment
+    generateIrradiance(32);   // diffuse irradiance
+    generatePrefilter(128);   // specular prefilter mip chain
+    generateBRDF(256);        // BRDF LUT
+
+    // ---------- common params ----------
     glm::vec3 lightDir = glm::normalize(glm::vec3(-0.7f,-1.2f,-0.35f));
     glm::vec3 fogColor(0.02f,0.06f,0.09f);
     float fogNear = 1.5f, fogFar = 9.0f;
@@ -613,56 +710,87 @@ int main() {
         process_input(win, dt);
 
         // updates
-        updateSchool(clownfish, dt, -0.55f, waterY-0.09f, 1.2f);
-        updateSchool(neon,      dt, -0.50f, waterY-0.07f, 1.6f, 0.22f, 0.30f);
-        updateSchool(danio,     dt, -0.50f, waterY-0.07f, 1.8f, 0.18f, 0.40f);
+        auto updateSchool=[&](std::vector<FishInst>& fish, float yMin, float yMax, float maxSpeed, float cohesion=0.18f, float alignW=0.45f){
+            const float neighborDist2 = 0.18f, avoidDist2=0.06f;
+            for (auto &f : fish) {
+                glm::vec3 pos=f.pos, vel=f.vel;
+                glm::vec3 align(0), coh(0), sep(0); int count = 0;
+                for (auto &o : fish) {
+                    if (&o==&f) continue;
+                    glm::vec3 d = o.pos - pos; float d2 = glm::dot(d,d);
+                    if (d2 < neighborDist2) {
+                        align += o.vel; coh += o.pos; ++count;
+                        if (d2 < avoidDist2) sep -= d * (0.2f / std::max(d2, 1e-4f));
+                    }
+                }
+                if (count>0) { align = glm::normalize(align/(float)count) * 0.6f; coh = (coh/(float)count) - pos; }
+                glm::vec3 steer(0); glm::vec3 lim=TANK_EXTENTS;
+                if (pos.x> lim.x) steer.x -= (pos.x-lim.x)*2.2f; if (pos.x<-lim.x) steer.x += (-lim.x-pos.x)*2.2f;
+                if (pos.z> lim.z) steer.z -= (pos.z-lim.z)*2.2f; if (pos.z<-lim.z) steer.z += (-lim.z-pos.z)*2.2f;
+                if (pos.y> yMax)  steer.y -= (pos.y-yMax)*3.2f; if (pos.y< yMin)  steer.y += (yMin-pos.y)*3.2f;
+                glm::vec3 drift(std::sin(f.phase*0.7f)*0.1f, std::sin(f.phase*1.3f)*0.05f, std::cos(f.phase*0.9f)*0.1f);
+                glm::vec3 jitter(urand(rng)*0.12f, urand(rng)*0.06f, urand(rng)*0.12f);
+                vel += align*alignW + coh*cohesion + sep*1.15f + steer*1.2f + drift*0.3f + jitter*0.25f;
+                float s=glm::length(vel); if (s>maxSpeed) vel*= (maxSpeed/s);
+                pos += vel*dt; f.pos=pos; f.vel=vel; f.phase += dt*3.0f;
+            }
+        };
+        updateSchool(clownfish, -0.55f, waterY-0.09f, 1.2f);
+        updateSchool(neon,      -0.50f, waterY-0.07f, 1.6f, 0.22f, 0.30f);
+        updateSchool(danio,     -0.50f, waterY-0.07f, 1.8f, 0.18f, 0.40f);
         updateBubbles(dt);
 
         // ------------------- Render to HDR FBO -------------------
         glBindFramebuffer(GL_FRAMEBUFFER, hdrFBO);
-        glViewport(0, 0, SCR_W, SCR_H); // make sure FBO matches
+        glViewport(0,0,SCR_W,SCR_H);
         glClearColor(fogColor.r, fogColor.g, fogColor.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 proj = glm::perspective(glm::radians(60.0f),(float)SCR_W/(float)SCR_H,0.05f,100.0f);
         glm::mat4 view = glm::lookAt(camPos, camPos+camFront, camUp);
 
-        // ====================== FLOOR ======================
+        // ===== Floor (sand) =====
         glUseProgram(progBasic);
-        glUniformMatrix4fv(uLoc(progBasic, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progBasic, "uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniform3f(uLoc(progBasic, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
-        glUniform3f(uLoc(progBasic, "uViewPos"), camPos.x, camPos.y, camPos.z);
-        glUniform3f(uLoc(progBasic, "uFogColor"), fogColor.r,fogColor.g,fogColor.b);
-        glUniform1f(uLoc(progBasic, "uFogNear"),  fogNear);
-        glUniform1f(uLoc(progBasic, "uFogFar"),   fogFar);
-        glUniform1f(uLoc(progBasic, "uTime"),     now);
-        glUniform1i(uLoc(progBasic, "uApplyCaustics"), 1);
-        glUniform1f(uLoc(progBasic, "uAlpha"), 1.0f);
-        glUniform1i(uLoc(progBasic, "uMaterialType"), 0); // sand
-        glUniformMatrix4fv(uLoc(progBasic, "uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
-        glUniform3f(uLoc(progBasic, "uBaseColor"), 0.78f, 0.72f, 0.52f);
+        glUniformMatrix4fv(u(progBasic,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(u(progBasic,"uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
+        glUniform3f(u(progBasic,"uLightDir"), lightDir.x,lightDir.y,lightDir.z);
+        glUniform3f(u(progBasic,"uViewPos"), camPos.x, camPos.y, camPos.z);
+        glUniform3f(u(progBasic,"uFogColor"), fogColor.r,fogColor.g,fogColor.b);
+        glUniform1f(u(progBasic,"uFogNear"),  fogNear);
+        glUniform1f(u(progBasic,"uFogFar"),   fogFar);
+        glUniform1f(u(progBasic,"uTime"),     now);
+        glUniform1i(u(progBasic,"uApplyCaustics"), 1);
+        glUniform1i(u(progBasic,"uMaterialType"), 0);
+        glUniform1f(u(progBasic,"uAlpha"), 1.0f);
+        glUniform3f(u(progBasic,"uBaseColor"), 0.78f, 0.72f, 0.52f);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_CUBE_MAP, irrCube);
+        glUniform1i(u(progBasic,"uIrradiance"), 1);
+        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterCube);
+        glUniform1i(u(progBasic,"uPrefilter"), 2);
+        glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, brdfLUT);
+        glUniform1i(u(progBasic,"uBRDFLUT"), 3);
+        glUniform1f(u(progBasic,"uPrefLodMax"), (float)prefilterMaxMip);
         glBindVertexArray(floorMesh.vao);
         glDrawElements(GL_TRIANGLES, floorMesh.idxCount, GL_UNSIGNED_INT, 0);
 
-        // ====================== ROCKS ======================
-        glUniform1i(uLoc(progBasic, "uApplyCaustics"), 0);
-        glUniform1f(uLoc(progBasic, "uAlpha"), 1.0f);
-        glUniform1i(uLoc(progBasic, "uMaterialType"), 1); // rock mode
+        // ===== Rocks =====
+        glUniform1i(u(progBasic,"uApplyCaustics"), 0);
+        glUniform1i(u(progBasic,"uMaterialType"), 1);
         for (int i=0;i<N_ROCKS;++i) {
             glm::vec4 r = rocks[i];
             glm::mat4 M = glm::translate(glm::mat4(1.0f), glm::vec3(r.x, r.y, r.z))
                         * glm::scale(glm::mat4(1.0f), glm::vec3(r.w));
-            glUniformMatrix4fv(uLoc(progBasic, "uModel"),1,GL_FALSE,glm::value_ptr(M));
-            glUniform3f(uLoc(progBasic, "uBaseColor"),
-                        0.35f+0.12f*(float)i/N_ROCKS, 0.30f, 0.26f);
+            glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(M));
+            glUniform3f(u(progBasic,"uBaseColor"), 0.35f+0.12f*(float)i/N_ROCKS, 0.30f, 0.26f);
             glBindVertexArray(rockMesh.vao);
             glDrawElements(GL_TRIANGLES, rockMesh.idxCount, GL_UNSIGNED_INT, 0);
         }
-        glUniform1i(uLoc(progBasic, "uMaterialType"), 0); // reset
+        glUniform1i(u(progBasic,"uMaterialType"), 0);
 
-        // ====================== PLANTS ======================
+        // ===== Plants =====
         {
+            if (!plantVBO) glGenBuffers(1,&plantVBO);
             std::vector<float> data; data.resize(N_PLANTS*8);
             for (int i=0;i<N_PLANTS;++i) {
                 int o=i*8;
@@ -673,16 +801,15 @@ int main() {
             glBindBuffer(GL_ARRAY_BUFFER, plantVBO);
             glBufferData(GL_ARRAY_BUFFER, data.size()*sizeof(float), data.data(), GL_DYNAMIC_DRAW);
         }
-        GLuint progPlantLoc = progPlant;
-        glUseProgram(progPlantLoc);
-        glUniformMatrix4fv(uLoc(progPlantLoc, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progPlantLoc, "uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniform1f(uLoc(progPlantLoc, "uTime"), now);
-        glUniform3f(uLoc(progPlantLoc, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
-        glUniform3f(uLoc(progPlantLoc, "uViewPos"), camPos.x, camPos.y, camPos.z);
-        glUniform3f(uLoc(progPlantLoc, "uFogColor"), fogColor.r,fogColor.g,fogColor.b);
-        glUniform1f(uLoc(progPlantLoc, "uFogNear"),  fogNear);
-        glUniform1f(uLoc(progPlantLoc, "uFogFar"),   fogFar);
+        glUseProgram(progPlant);
+        glUniformMatrix4fv(u(progPlant,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(u(progPlant,"uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniform1f(u(progPlant,"uTime"), now);
+        glUniform3f(u(progPlant,"uLightDir"), lightDir.x,lightDir.y,lightDir.z);
+        glUniform3f(u(progPlant,"uViewPos"), camPos.x, camPos.y, camPos.z);
+        glUniform3f(u(progPlant,"uFogColor"), fogColor.r,fogColor.g,fogColor.b);
+        glUniform1f(u(progPlant,"uFogNear"),  fogNear);
+        glUniform1f(u(progPlant,"uFogFar"),   fogFar);
         glBindVertexArray(plantMesh.vao);
         glBindBuffer(GL_ARRAY_BUFFER, plantVBO);
         glEnableVertexAttribArray(8);  glVertexAttribPointer(8,3,GL_FLOAT,GL_FALSE,sizeof(float)*8,(void*)0);                 glVertexAttribDivisor(8,1);
@@ -691,7 +818,7 @@ int main() {
         glDrawElementsInstanced(GL_TRIANGLES, plantMesh.idxCount, GL_UNSIGNED_INT, 0, N_PLANTS);
         glBindVertexArray(0);
 
-        // ====================== FISH ======================
+        // ===== Fish =====
         auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo){
             std::vector<float> inst; inst.resize(species.size()*15);
             for (size_t i=0;i<species.size();++i) {
@@ -718,14 +845,21 @@ int main() {
             glBindVertexArray(fishMesh.vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glUseProgram(progFish);
-            glUniformMatrix4fv(uLoc(progFish, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-            glUniformMatrix4fv(uLoc(progFish, "uView"),1,GL_FALSE,glm::value_ptr(view));
-            glUniform3f(uLoc(progFish, "uLightDir"), -lightDir.x, -lightDir.y, -lightDir.z);
-            glUniform3f(uLoc(progFish, "uViewPos"), camPos.x, camPos.y, camPos.z);
-            glUniform1f(uLoc(progFish, "uTime"), now);
-            glUniform3f(uLoc(progFish, "uFogColor"), fogColor.r,fogColor.g,fogColor.b);
-            glUniform1f(uLoc(progFish, "uFogNear"),  fogNear);
-            glUniform1f(uLoc(progFish, "uFogFar"),   fogFar);
+            glUniformMatrix4fv(u(progFish,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+            glUniformMatrix4fv(u(progFish,"uView"),1,GL_FALSE,glm::value_ptr(view));
+            glUniform3f(u(progFish,"uLightDir"), -lightDir.x, -lightDir.y, -lightDir.z);
+            glUniform3f(u(progFish,"uViewPos"), camPos.x, camPos.y, camPos.z);
+            glUniform1f(u(progFish,"uTime"), now);
+            glUniform3f(u(progFish,"uFogColor"), fogColor.r,fogColor.g,fogColor.b);
+            glUniform1f(u(progFish,"uFogNear"),  fogNear);
+            glUniform1f(u(progFish,"uFogFar"),   fogFar);
+            glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_CUBE_MAP, irrCube);
+            glUniform1i(u(progFish,"uIrradiance"), 1);
+            glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterCube);
+            glUniform1i(u(progFish,"uPrefilter"), 2);
+            glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, brdfLUT);
+            glUniform1i(u(progFish,"uBRDFLUT"), 3);
+            glUniform1f(u(progFish,"uPrefLodMax"), (float)prefilterMaxMip);
             glDrawElementsInstanced(GL_TRIANGLES, fishMesh.idxCount, GL_UNSIGNED_INT, 0, (GLsizei)v.size());
             glBindVertexArray(0);
         };
@@ -733,69 +867,74 @@ int main() {
         drawSpecies(neon,     vboNeon);
         drawSpecies(danio,    vboDanio);
 
-        // Copy opaque HDR for refraction
+        // copy opaque for refraction
         glBindFramebuffer(GL_READ_FRAMEBUFFER, hdrFBO);
         glBindTexture(GL_TEXTURE_2D, opaqueCopyTex);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, SCR_W, SCR_H);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
-        // ====================== BUBBLES ======================
+        // ===== Bubbles =====
         glUseProgram(progBub);
-        glUniformMatrix4fv(uLoc(progBub, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progBub, "uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniformMatrix4fv(u(progBub,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(u(progBub,"uView"),1,GL_FALSE,glm::value_ptr(view));
         glBindVertexArray(bubbleVAO);
         glDrawArrays(GL_POINTS, 0, N_BUB);
 
-        // ====================== WATER ======================
+        // ===== Water =====
         glUseProgram(progWater);
-        glUniformMatrix4fv(uLoc(progWater, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progWater, "uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniformMatrix4fv(uLoc(progWater, "uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
-        glUniform1f(uLoc(progWater, "uTime"), now);
-        glUniform3f(uLoc(progWater, "uDeepColor"),    0.0f, 0.25f, 0.45f);
-        glUniform3f(uLoc(progWater, "uShallowColor"), 0.1f, 0.6f,  0.8f);
-        glUniform3f(uLoc(progWater, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
-        glUniform3f(uLoc(progWater, "uViewPos"), camPos.x,camPos.y,camPos.z);
+        glUniformMatrix4fv(u(progWater,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(u(progWater,"uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniformMatrix4fv(u(progWater,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
+        glUniform1f(u(progWater,"uTime"), now);
+        glUniform3f(u(progWater,"uDeepColor"),    0.0f, 0.25f, 0.45f);
+        glUniform3f(u(progWater,"uShallowColor"), 0.1f, 0.6f,  0.8f);
+        glUniform3f(u(progWater,"uLightDir"), lightDir.x,lightDir.y,lightDir.z);
+        glUniform3f(u(progWater,"uViewPos"), camPos.x,camPos.y,camPos.z);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, opaqueCopyTex);
-        glUniform1i(uLoc(progWater, "uSceneColor"), 0);
+        glUniform1i(u(progWater,"uSceneColor"), 0);
         glBindVertexArray(waterMesh.vao);
         glDisable(GL_CULL_FACE);
         glDrawElements(GL_TRIANGLES, waterMesh.idxCount, GL_UNSIGNED_INT, 0);
         glEnable(GL_CULL_FACE);
 
-        // ====================== GLASS ======================
+        // ===== Glass =====
         glUseProgram(progBasic);
-        glUniformMatrix4fv(uLoc(progBasic, "uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progBasic, "uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniformMatrix4fv(uLoc(progBasic, "uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
-        glUniform3f(uLoc(progBasic, "uLightDir"), lightDir.x,lightDir.y,lightDir.z);
-        glUniform3f(uLoc(progBasic, "uViewPos"), camPos.x, camPos.y, camPos.z);
-        glUniform3f(uLoc(progBasic, "uFogColor"), fogColor.r,fogColor.g,fogColor.b);
-        glUniform1f(uLoc(progBasic, "uFogNear"),  fogNear);
-        glUniform1f(uLoc(progBasic, "uFogFar"),   fogFar);
-        glUniform1f(uLoc(progBasic, "uTime"),     now);
-        glUniform1i(uLoc(progBasic, "uApplyCaustics"), 0);
-        glUniform1i(uLoc(progBasic, "uMaterialType"), 0);
-        glUniform3f(uLoc(progBasic, "uBaseColor"), 0.12f, 0.28f, 0.45f);
-        glUniform1f(uLoc(progBasic, "uAlpha"), 0.18f);
+        glUniformMatrix4fv(u(progBasic,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(u(progBasic,"uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
+        glUniform3f(u(progBasic,"uLightDir"), lightDir.x,lightDir.y,lightDir.z);
+        glUniform3f(u(progBasic,"uViewPos"), camPos.x, camPos.y, camPos.z);
+        glUniform3f(u(progBasic,"uFogColor"), fogColor.r,fogColor.g,fogColor.b);
+        glUniform1f(u(progBasic,"uFogNear"),  fogNear);
+        glUniform1f(u(progBasic,"uFogFar"),   fogFar);
+        glUniform1f(u(progBasic,"uTime"),     now);
+        glUniform1i(u(progBasic,"uApplyCaustics"), 0);
+        glUniform1i(u(progBasic,"uMaterialType"), 0);
+        glUniform3f(u(progBasic,"uBaseColor"), 0.12f, 0.28f, 0.45f);
+        glUniform1f(u(progBasic,"uAlpha"), 0.18f);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_CUBE_MAP, irrCube);
+        glUniform1i(u(progBasic,"uIrradiance"), 1);
+        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterCube);
+        glUniform1i(u(progBasic,"uPrefilter"), 2);
+        glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, brdfLUT);
+        glUniform1i(u(progBasic,"uBRDFLUT"), 3);
+        glUniform1f(u(progBasic,"uPrefLodMax"), (float)prefilterMaxMip);
         glDepthMask(GL_FALSE);
         glBindVertexArray(tankMesh.vao);
         glDrawElements(GL_TRIANGLES, tankMesh.idxCount, GL_UNSIGNED_INT, 0);
         glDepthMask(GL_TRUE);
 
-        // ------------------- Tonemap -------------------
+        // ----- tonemap to screen -----
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDisable(GL_DEPTH_TEST);
-        glViewport(0, 0, SCR_W, SCR_H); // IMPORTANT for Retina
-        GLuint progToneLoc = progTone;
-        glUseProgram(progToneLoc);
+        glViewport(0,0,SCR_W,SCR_H);
+        glUseProgram(progTone);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, hdrColorTex);
-        glUniform1i(uLoc(progToneLoc, "uHDR"), 0);
-        glUniform1f(uLoc(progToneLoc, "uExposure"), exposure);
-        glBindVertexArray(screenVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glUniform1i(u(progTone,"uHDR"), 0);
+        glUniform1f(u(progTone,"uExposure"), exposure);
+        drawScreenTriangle();
         glEnable(GL_DEPTH_TEST);
 
         glfwSwapBuffers(win);
