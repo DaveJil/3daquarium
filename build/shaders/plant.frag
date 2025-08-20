@@ -11,20 +11,18 @@ uniform float uFogNear, uFogFar;
 
 out vec4 FragColor;
 
-float fogFactor(float d) {
-    return clamp((uFogFar - d) / (uFogFar - uFogNear), 0.0, 1.0);
-}
+float fogFactor(float d){ return clamp((uFogFar - d) / (uFogFar - uFogNear), 0.0, 1.0); }
 
-void main() {
+void main(){
     vec3 N = normalize(vNormal);
-    vec3 L = normalize(-uLightDir);
+    vec3 L = normalize(uLightDir);
     vec3 V = normalize(uViewPos - vWorldPos);
     vec3 R = reflect(-L, N);
 
     float ndl = max(dot(N,L), 0.0);
-    float spec = pow(max(dot(R,V),0.0), 16.0) * 0.12;
+    float spec = pow(max(dot(R,V),0.0), 16.0) * 0.1;
 
-    // Translucency when back-lit (fake subsurface for thin leaves)
+    // back-light translucency
     float trans = pow(max(dot(-N, L), 0.0), 1.5) * 0.6;
 
     vec3 base = vColor;
