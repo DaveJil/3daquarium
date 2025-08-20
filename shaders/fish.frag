@@ -8,8 +8,8 @@ in float vSpecies;
 in vec3 vTanU;     // world tangent along body (u)
 in vec3 vTanV;     // world tangent around body (v)
 
-in float vFinMask;
-in vec2  vFinUV;
+in float vFinMask; // 1 for fin triangles
+in vec2  vFinUV;   // fin UVs (local)
 
 uniform vec3 uLightDir;  // direction TOWARDS light
 uniform vec3 uViewPos;
@@ -20,17 +20,43 @@ uniform float uTime;
 
 out vec4 FragColor;
 
+const float PI = 3.14159265359;
+
+// -------------------- helpers --------------------
 float fogFactor(float d){ return clamp((uFogFar - d) / (uFogFar - uFogNear), 0.0, 1.0); }
 float sat(float x){ return clamp(x,0.0,1.0); }
 
-// ---------- Species base palettes & markings ----------
+// Schlick Fresnel
+vec3 F_Schlick(float cosTheta, vec3 F0){
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+// GGX / Trowbridge-Reitz
+float D_GGX(vec3 N, vec3 H, float rough){
+    float a  = rough*rough;
+    float a2 = a*a;
+    float NdH = max(dot(N,H), 0.0);
+    float NdH2 = NdH*NdH;
+    float denom = NdH2 * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * denom * denom, 1e-6);
+}
+// Smith GGX geometry (Schlick-G)
+float G_SchlickGGX(float NdV, float rough){
+    float r = rough + 1.0;
+    float k = (r*r) / 8.0;
+    return NdV / (NdV * (1.0 - k) + k);
+}
+float G_Smith(vec3 N, vec3 V, vec3 L, float rough){
+    float NdV = max(dot(N,V),0.0);
+    float NdL = max(dot(N,L),0.0);
+    return G_SchlickGGX(NdV, rough) * G_SchlickGGX(NdL, rough);
+}
+
+// -------- species base palettes & markings (as before) --------
 float stripe(float x, float c, float w){
     return smoothstep(c-w, c-0.5*w, x) - smoothstep(c+0.5*w, c+w, x);
 }
-
 vec3 speciesBaseColor(int sp, float len, vec3 local, vec3 tint){
     if (sp == 0) {
-        // Clownfish: orange with white bands + black borders
         vec3 orange = mix(vec3(1.0,0.55,0.18), tint, 0.25);
         float band1 = stripe(len, 0.18, 0.07);
         float band2 = stripe(len, 0.47, 0.07);
@@ -42,7 +68,6 @@ vec3 speciesBaseColor(int sp, float len, vec3 local, vec3 tint){
         vec3 base = mix(orange, white, bands);
         return mix(base, black, sat(border)*0.85);
     } else if (sp == 1) {
-        // Neon tetra: cyan stripe + red belly, slight iridescence
         float y = local.y;
         vec3 top  = vec3(0.2,0.95,1.0);
         vec3 bot  = vec3(0.9,0.18,0.2);
@@ -51,7 +76,6 @@ vec3 speciesBaseColor(int sp, float len, vec3 local, vec3 tint){
         float iri = pow(1.0 - max(dot(normalize(vNormal), normalize(uViewPos - (vWorldPos))),0.0), 3.0);
         return base + vec3(0.15,0.2,0.25) * iri;
     } else {
-        // Zebra danio: blue/gold longitudinal stripes
         float s = 0.6 + 0.4*sin(local.y*40.0 + sin(len*15.0)*0.5);
         vec3 gold = vec3(0.95,0.85,0.55);
         vec3 blue = vec3(0.25,0.45,0.85);
@@ -59,7 +83,7 @@ vec3 speciesBaseColor(int sp, float len, vec3 local, vec3 tint){
     }
 }
 
-// ---------- Worley “scale cells” for BODY bump ----------
+// ------- Worley “scale cells” for BODY bump (as before) -------
 vec2 hash22(vec2 p){
     p = vec2(dot(p, vec2(127.1,311.7)), dot(p, vec2(269.5,183.3)));
     return fract(sin(p)*43758.5453);
@@ -89,13 +113,11 @@ float scaleHeight(vec2 uv, float density, float edgeW){
     return ridge;
 }
 
-// ---------- FIN normal map (procedural ripple) ----------
+// -------- FIN normal map (procedural ripple) --------
 float finHeightFn(vec2 uv){
-    // diagonal ripples with small flutter animation
     float t = uTime;
     float ridges = sin(uv.x*7.5 + sin(uv.y*1.8 + t*2.0)*0.8)
                  + 0.35*sin(uv.x*14.0 + t*1.7);
-    // subtle vein-like structure
     ridges += 0.25*sin(uv.y*10.0 + sin(uv.x*2.5)*0.7);
     return ridges * 0.5;
 }
@@ -104,9 +126,21 @@ vec3 finWorldNormal(vec3 N0, vec3 T, vec3 B, vec2 uv){
     float h  = finHeightFn(uv);
     float hx = finHeightFn(uv + vec2(eps,0.0)) - h;
     float hy = finHeightFn(uv + vec2(0.0,eps)) - h;
-    float amp = 0.35; // fin bump strength
+    float amp = 0.35;
     vec3 n_ts = normalize(vec3(-hx*amp, -hy*amp, 1.0));
     return normalize(T*n_ts.x + B*n_ts.y + N0*n_ts.z);
+}
+
+// -------- SH-like underwater ambient (cheap IBL) --------
+// Prebaked blue-ish gradient; oriented so +Y is up.
+vec3 evalAmbient(vec3 n){
+    vec3 top    = vec3(0.10, 0.22, 0.34);
+    vec3 middle = vec3(0.04, 0.10, 0.16);
+    vec3 bottom = vec3(0.01, 0.02, 0.03);
+    float up = clamp(n.y*0.5 + 0.5, 0.0, 1.0);
+    vec3 midMix = mix(middle, top,   smoothstep(0.2, 0.9, up));
+    vec3 amb    = mix(bottom, midMix, smoothstep(0.0, 1.0, up));
+    return amb;
 }
 
 void main(){
@@ -127,9 +161,8 @@ void main(){
     float hu = scaleHeight(bodyUV + vec2(eps,0.0), density, 0.055) - h;
     float hv = scaleHeight(bodyUV + vec2(0.0,eps), density, 0.055) - h;
 
-    float bumpK = 0.65 * smoothstep(0.06, 0.25, u);  // fade at head
-    // Do not apply body scales on fins
-    bumpK *= (1.0 - vFinMask);
+    float bumpK = 0.65 * smoothstep(0.06, 0.25, u);
+    bumpK *= (1.0 - vFinMask); // no body scales on fins
 
     vec3 T = normalize(vTanU);
     vec3 B = normalize(vTanV);
@@ -138,49 +171,58 @@ void main(){
     // ----- FIN normal map -----
     vec3 N_fin = finWorldNormal(N0, T, B, vFinUV);
 
-    // Blend normals depending on area
+    // Blend normals
     vec3 N = normalize( mix(N_body, N_fin, vFinMask) );
 
-    // Species coloration + eyes
+    // Species coloration + eye
     vec3 base = speciesBaseColor(int(vSpecies+0.5), u, vLocal, vColor);
-
-    // Eye near head
     float eyeCenter = 0.075;
     float eye = smoothstep(0.028, 0.018, length(vec2((u - eyeCenter)*1.8, abs(vLocal.z) - 0.02)));
     float pupil = smoothstep(0.012, 0.008, length(vec2((u - eyeCenter)*1.8, abs(vLocal.z) - 0.02)));
     vec3 eyeCol = mix(vec3(0.1), vec3(0.95), eye) * (1.0 - pupil) + vec3(0.02) * pupil;
 
-    // ----- Lighting -----
-    float diff = max(dot(N, L), 0.0);
-    vec3  R    = reflect(-L, N);
-    float spec1 = pow(max(dot(R, normalize(V)), 0.0), 64.0) * 0.18;  // glossy
-    float spec2 = pow(max(dot(R, normalize(V)), 0.0), 170.0) * (0.20 * h) * (1.0 - vFinMask); // sparkle from body scales
-    // Fins get slightly higher glossy highlight (thin wet membrane)
-    float specFin = pow(max(dot(R, normalize(V)), 0.0), 96.0) * 0.12 * vFinMask;
+    // ----- PBR params -----
+    float metallic = 0.0;                               // fish are dielectrics
+    float roughBody = 0.35;                             // glossy but not mirror
+    float roughFin  = 0.55;                             // fins a bit rougher
+    float roughness = mix(roughBody, roughFin, vFinMask);
 
-    // Tiny albedo variation inside scales
-    vec3 albedo = mix(base * (1.0 + 0.08*(h - 0.5)), base, vFinMask);
+    vec3  F0 = vec3(0.04);                              // dielectric base reflectance
+           F0 = mix(F0, base, metallic);
 
-    // Rim for wet look
-    float rim = pow(1.0 - max(dot(N, V), 0.0), 2.0) * 0.25;
+    // direct lighting
+    vec3  H = normalize(V + L);
+    float NdL = max(dot(N, L), 0.0);
+    float NdV = max(dot(N, V), 0.0);
 
-    // ----- Subsurface Scattering (thin parts) -----
-    // back-light term using the *original* normal for better thickness feel
+    vec3  F = F_Schlick(max(dot(H, V), 0.0), F0);
+    float D = D_GGX(N, H, roughness);
+    float G = G_Smith(N, V, L, roughness);
+    vec3  spec = (D * G * F) / max(4.0 * NdV * NdL + 1e-6, 1e-6);
+
+    vec3 kd = (1.0 - F) * (1.0 - metallic);
+    vec3 diffuse = kd * base / PI;
+
+    // sparkle from body scale edges (kept, subtly)
+    float sparkle = pow(max(dot(reflect(-L, N), normalize(V)), 0.0), 170.0) * (0.12 * h) * (1.0 - vFinMask);
+
+    vec3 Lo = (diffuse + spec) * NdL + vec3(sparkle);
+
+    // ----- Ambient (IBL-like) -----
+    vec3 ambientIrr = evalAmbient(N);                   // SH-ish irradiance
+    vec3 ambient = ambientIrr * kd * base;              // Lambert
+
+    // ----- SSS (fins + belly backlight) -----
     float backLight = pow(max(dot(-L, N0), 0.0), 1.6);
-
-    // Belly mask: underside (negative local.y), stronger mid-body, fades at tail
     float belly = smoothstep(0.00, 0.18, -vLocal.y) * (1.0 - smoothstep(0.65, 0.95, u));
-    // Fins are fully thin
     float thinMask = clamp(belly*0.8 + vFinMask*1.0, 0.0, 1.0);
+    vec3  sssCol = mix(base, vec3(1.0, 0.86, 0.7), 0.55);
+    vec3  sss = sssCol * backLight * (0.45 * thinMask);
 
-    // SSS color: warmish tint mixed with species base
-    vec3 sssCol = mix(base, vec3(1.0, 0.86, 0.7), 0.55);
-    vec3 sss = sssCol * backLight * (0.45 * thinMask);
+    // combine
+    vec3 lit = ambient + Lo + sss;
 
-    // Combine
-    vec3 lit = albedo * (0.18 + 0.82*diff) + vec3(spec1 + spec2 + specFin) + rim*vec3(0.12,0.16,0.20) + sss;
-
-    // Paint eye
+    // paint eye
     lit = mix(lit, eyeCol, eye);
 
     // Fog
