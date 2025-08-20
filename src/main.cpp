@@ -6,7 +6,7 @@
 
 #ifdef __APPLE__
   #define GL_SILENCE_DEPRECATION
-  #include <OpenGL/gl3.h>
+  #include <OpenGL/gl3.h>   // macOS OpenGL 4.1 core
 #else
   #error "This setup is macOS-only. For Windows/Linux, use the GLEW/GLAD path."
 #endif
@@ -16,6 +16,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+// ------------------------- Window & Camera -------------------------
 static int SCR_W = 1280, SCR_H = 720;
 
 static float camYaw = -90.0f, camPitch = -5.0f;
@@ -40,9 +41,9 @@ static void mouse_callback(GLFWwindow*, double xpos, double ypos) {
     camYaw += xoffset; camPitch += yoffset;
     camPitch = std::clamp(camPitch, -89.0f, 89.0f);
     glm::vec3 front;
-    front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
-    front.y = sin(glm::radians(camPitch));
-    front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+    front.x = std::cos(glm::radians(camYaw)) * std::cos(glm::radians(camPitch));
+    front.y = std::sin(glm::radians(camPitch));
+    front.z = std::sin(glm::radians(camYaw)) * std::cos(glm::radians(camPitch));
     camFront = glm::normalize(front);
 }
 static void process_input(GLFWwindow* win, float dt) {
@@ -56,6 +57,7 @@ static void process_input(GLFWwindow* win, float dt) {
     if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) camPos.y += vel;
 }
 
+// ------------------------- Utilities -------------------------
 static GLuint compileShader(GLenum type, const char* src, const char* name) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -89,9 +91,10 @@ static std::string loadFile(const char* path) {
     return s;
 }
 
+// ------------------------- Geometry Helpers -------------------------
 struct Mesh { GLuint vao=0, vbo=0, ebo=0; GLsizei idxCount=0; };
 
-// ---- Tank walls (inward normals) ----
+// Tank walls (inward-facing normals)
 static Mesh makeBox(float w, float h, float d) {
     float x=w*0.5f, y=h*0.5f, z=d*0.5f;
     struct V { glm::vec3 p,n; };
@@ -119,15 +122,13 @@ static Mesh makeBox(float w, float h, float d) {
     return m;
 }
 
-// ---- Water surface (pos+uv) ----
+// Water plane (position + UV in attrib 0/2)
 static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.0f, float sz=1.6f, float y=0.4f) {
     struct V { glm::vec3 p; glm::vec2 uv; };
     std::vector<V> v; v.reserve((nx+1)*(nz+1));
-    for (int z=0; z<=nz; ++z) {
-        for (int x=0; x<=nx; ++x) {
-            float u = (float)x/nx, w=(float)z/nz;
-            v.push_back({ glm::vec3((u-0.5f)*sx, y, (w-0.5f)*sz), glm::vec2(u,w) });
-        }
+    for (int z=0; z<=nz; ++z) for (int x=0; x<=nx; ++x) {
+        float u = (float)x/nx, w=(float)z/nz;
+        v.push_back({ glm::vec3((u-0.5f)*sx, y, (w-0.5f)*sz), glm::vec2(u,w) });
     }
     std::vector<unsigned> idx; idx.reserve(nx*nz*6);
     for (int z=0; z<nz; ++z) for (int x=0; x<nx; ++x) {
@@ -146,7 +147,7 @@ static Mesh makeWaterPlane(int nx=120, int nz=120, float sx=3.0f, float sz=1.6f,
     return m;
 }
 
-// ---- Floor (solid plane with normals) ----
+// Floor plane (with normals)
 static Mesh makeFloor(float sx=3.0f, float sz=1.6f, float y=-0.85f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v = {
@@ -168,46 +169,76 @@ static Mesh makeFloor(float sx=3.0f, float sz=1.6f, float y=-0.85f) {
     return m;
 }
 
-// ---- Simple low-poly fish mesh (local X = 0..1 along body) ----
+// Better low-poly fusiform fish mesh (rounded body)
 static Mesh makeFishMesh() {
-    // positions + normals for a wedge body and tail fins
     struct V { glm::vec3 p,n; };
     std::vector<V> v;
     std::vector<unsigned> idx;
 
-    auto addTri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c){
-        glm::vec3 n = glm::normalize(glm::cross(b-a, c-a));
-        unsigned base = (unsigned)v.size();
-        v.push_back({a,n}); v.push_back({b,n}); v.push_back({c,n});
-        idx.insert(idx.end(), {base, base+1, base+2});
+    auto push = [&](const glm::vec3& p, const glm::vec3& n){
+        v.push_back({p, glm::normalize(n)});
     };
 
-    // Body (a tiny prism)
-    float H = 0.08f, W = 0.06f, L = 1.0f;
-    glm::vec3 head = {0.0f, 0.0f, 0.0f};
-    glm::vec3 b1 = {0.6f,  H,  0.0f};
-    glm::vec3 b2 = {0.6f, -H,  0.0f};
-    glm::vec3 b3 = {0.6f,  0.0f,  W};
-    glm::vec3 b4 = {0.6f,  0.0f, -W};
+    const int   segX = 22;        // length segments
+    const int   segR = 18;        // radial segments
+    const float rMax = 0.09f;     // max radius
+    const float zFlatten = 0.65f; // thinner left-right
 
-    // sides
-    addTri(head, b1, b3);
-    addTri(head, b3, b2);
-    addTri(head, b2, b4);
-    addTri(head, b4, b1);
+    // rings along +X (0=head .. 1=tail base)
+    for (int i=0; i<=segX; ++i) {
+        float t = (float)i / (float)segX;
+        float tClamped = std::clamp(t*1.02f, 0.0f, 1.0f);
+        float r = rMax * std::pow(std::sin(3.14159f * tClamped), 0.75f);
+        if (i == 0) r *= 0.6f; // sharper nose
 
-    // Tail (two triangles at x=L)
-    glm::vec3 tL = {L,  0.0f,  0.0f};
-    glm::vec3 tU = {L,  0.12f, 0.05f};
-    glm::vec3 tD = {L, -0.12f, 0.05f};
-    glm::vec3 tU2= {L,  0.12f,-0.05f};
-    glm::vec3 tD2= {L, -0.12f,-0.05f};
-    addTri(b3, tU, tD);
-    addTri(b4, tU2, tD2);
+        for (int j=0; j<=segR; ++j) {
+            float a = (2.0f * 3.14159f) * (float)j / (float)segR;
+            float cy = std::cos(a), sy = std::sin(a);
+            glm::vec3 p = { t, r * cy, zFlatten * r * sy };
+            glm::vec3 n = { 0.0f, cy, (1.0f / zFlatten) * sy };
+            push(p, n);
+        }
+    }
 
-    // Dorsal + ventral fins (small)
-    addTri({0.3f, H, 0.0f}, {0.45f, H+0.08f, 0.0f}, {0.4f, H, 0.02f});
-    addTri({0.3f,-H, 0.0f}, {0.45f,-H-0.08f,0.0f}, {0.4f,-H, 0.02f});
+    // connect rings
+    int ring = segR + 1;
+    for (int i=0; i<segX; ++i) {
+        for (int j=0; j<segR; ++j) {
+            unsigned a = i*ring + j;
+            unsigned b = a + 1;
+            unsigned c = (i+1)*ring + j;
+            unsigned d = c + 1;
+            idx.insert(idx.end(), {a,c,b, b,c,d});
+        }
+    }
+
+    // nose cap
+    {
+        glm::vec3 nose = {0.0f, 0.0f, 0.0f};
+        unsigned baseCenter = (unsigned)v.size();
+        push(nose, glm::vec3(-1,0,0));
+        for (int j=0; j<segR; ++j) {
+            unsigned a = j;
+            unsigned b = j+1;
+            idx.insert(idx.end(), {baseCenter, b, a});
+        }
+    }
+
+    // simple vertical tail fin at x=1.05
+    {
+        float x = 1.05f;
+        glm::vec3 tU = {x,  0.14f,  0.0f};
+        glm::vec3 tD = {x, -0.14f,  0.0f};
+        glm::vec3 baseL = {1.0f,  0.04f,  0.02f};
+        glm::vec3 baseR = {1.0f, -0.04f,  0.02f};
+        glm::vec3 baseL2= {1.0f,  0.04f, -0.02f};
+        glm::vec3 baseR2= {1.0f, -0.04f, -0.02f};
+        unsigned s = (unsigned)v.size();
+        push(tU, {0,0,1}); push(tD,{0,0,1}); push(baseL,{0,0,1}); push(baseR,{0,0,1});
+        push(tU, {0,0,-1}); push(tD,{0,0,-1}); push(baseL2,{0,0,-1}); push(baseR2,{0,0,-1});
+        idx.insert(idx.end(), {s+2,s+0,s+1,  s+2,s+1,s+3}); // front side
+        idx.insert(idx.end(), {s+5,s+7,s+4,  s+5,s+6,s+7}); // back side
+    }
 
     Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
     glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
@@ -221,10 +252,10 @@ static Mesh makeFishMesh() {
     return m;
 }
 
-// ---------------- INSTANCE + PARTICLE DATA ----------------
+// ------------------------- Fish, Bubbles, State -------------------------
 struct Fish { glm::vec3 pos, vel; float phase, scale; };
 static std::vector<Fish> fish;
-static GLuint fishInstanceVBO = 0;   // holds iPos(3) + iDir(3) + iPhaseScale(2)
+static GLuint fishInstanceVBO = 0;   // per-instance: iPos(3) + iDir(3) + iPhaseScale(2)
 static Mesh fishMesh;
 
 static const int N_FISH = 120;
@@ -244,12 +275,10 @@ static void initFish() {
         glm::vec3 dir = glm::normalize(glm::vec3(urand(rng), urand(rng)*0.2f, urand(rng)));
         fish[i].vel = dir * (0.6f + urand01(rng)*0.8f);
         fish[i].phase = urand01(rng) * 6.28318f;
-        fish[i].scale = 0.7f + urand01(rng)*0.8f; // different sizes
+        fish[i].scale = 0.7f + urand01(rng)*0.8f; // sizes vary
     }
     glGenBuffers(1, &fishInstanceVBO);
 }
-
-// simple schooling-ish motion
 static void updateFish(float dt) {
     const float maxSpeed = 1.6f;
     const float neighborDist2 = 0.25f;   // squared
@@ -259,7 +288,6 @@ static void updateFish(float dt) {
         glm::vec3 pos = fish[i].pos;
         glm::vec3 vel = fish[i].vel;
 
-        // neighborhood
         glm::vec3 align(0), coh(0), sep(0);
         int count = 0;
         for (int j=0;j<N_FISH;++j) if (j!=i) {
@@ -277,7 +305,6 @@ static void updateFish(float dt) {
             coh   = (coh / (float)count) - pos;
         }
 
-        // boundaries (keep inside tank, below water)
         glm::vec3 steer(0);
         glm::vec3 limit = TANK_EXTENTS;
         if (pos.x >  limit.x) steer.x -= (pos.x - limit.x)*2.0f;
@@ -289,21 +316,20 @@ static void updateFish(float dt) {
         if (pos.y > maxY) steer.y -= (pos.y - maxY)*3.0f;
         if (pos.y < minY) steer.y += (minY - pos.y)*3.0f;
 
-        // random wander
         glm::vec3 jitter(urand(rng)*0.2f, urand(rng)*0.1f, urand(rng)*0.2f);
 
-        // combine
         vel += align*0.6f + coh*0.25f + sep*0.9f + steer*1.2f + jitter*0.3f;
         float s = glm::length(vel);
-        if (s > maxSpeed) vel = vel * (maxSpeed / s);
+        if (s > maxSpeed) vel *= (maxSpeed / s);
 
         pos += vel * dt;
         fish[i].pos = pos;
         fish[i].vel = vel;
+        fish[i].phase += dt * 3.5f;
     }
 }
 
-// ---- Bubbles (as point sprites) ----
+// Bubbles as point sprites
 static const int N_BUB = 80;
 static std::vector<glm::vec3> bubblePos;
 static GLuint bubbleVBO = 0;
@@ -326,11 +352,10 @@ static void initBubbles() {
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(glm::vec3),(void*)0);
     glBindVertexArray(0);
 }
-
 static void updateBubbles(float dt) {
     for (int i=0;i<N_BUB;++i) {
         bubblePos[i].y += (0.25f + 0.15f*urand01(rng)) * dt;
-        bubblePos[i].x += 0.05f * sin(glfwGetTime()*2.0 + i*0.37) * dt; // small wobble
+        bubblePos[i].x += 0.05f * std::sin(glfwGetTime()*2.0 + i*0.37) * dt;
         if (bubblePos[i].y > waterY - 0.02f) {
             bubblePos[i].y = -0.85f + urand01(rng)*0.1f;
             bubblePos[i].x = urand(rng)*TANK_EXTENTS.x*0.8f;
@@ -341,7 +366,7 @@ static void updateBubbles(float dt) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, bubblePos.size()*sizeof(glm::vec3), bubblePos.data());
 }
 
-// --------------- MAIN ---------------
+// ------------------------- Main -------------------------
 int main() {
     if (!glfwInit()) { std::cerr<<"GLFW init failed\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);
@@ -360,8 +385,11 @@ int main() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
     glEnable(GL_PROGRAM_POINT_SIZE);
+    // Enable blending for translucent water/bubbles
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // programs
+    // Load shaders
     std::string vs_basic = loadFile("shaders/basic.vert");
     std::string fs_basic = loadFile("shaders/basic.frag");
     std::string vs_water = loadFile("shaders/water.vert");
@@ -372,32 +400,32 @@ int main() {
     std::string fs_bub   = loadFile("shaders/bubbles.frag");
 
     GLuint progBasic = linkProgram(
-        compileShader(GL_VERTEX_SHADER, vs_basic.c_str(), "basic.vert"),
+        compileShader(GL_VERTEX_SHADER,   vs_basic.c_str(), "basic.vert"),
         compileShader(GL_FRAGMENT_SHADER, fs_basic.c_str(), "basic.frag"),
         "progBasic");
 
     GLuint progWater = linkProgram(
-        compileShader(GL_VERTEX_SHADER, vs_water.c_str(), "water.vert"),
+        compileShader(GL_VERTEX_SHADER,   vs_water.c_str(), "water.vert"),
         compileShader(GL_FRAGMENT_SHADER, fs_water.c_str(), "water.frag"),
         "progWater");
 
     GLuint progFish = linkProgram(
-        compileShader(GL_VERTEX_SHADER, vs_fish.c_str(), "fish.vert"),
+        compileShader(GL_VERTEX_SHADER,   vs_fish.c_str(), "fish.vert"),
         compileShader(GL_FRAGMENT_SHADER, fs_fish.c_str(), "fish.frag"),
         "progFish");
 
     GLuint progBub = linkProgram(
-        compileShader(GL_VERTEX_SHADER, vs_bub.c_str(), "bubbles.vert"),
+        compileShader(GL_VERTEX_SHADER,   vs_bub.c_str(), "bubbles.vert"),
         compileShader(GL_FRAGMENT_SHADER, fs_bub.c_str(), "bubbles.frag"),
         "progBub");
 
-    // geometry
-    Mesh tank = makeBox(3.5f, 2.0f, 1.6f);
-    Mesh water = makeWaterPlane();
+    // Geometry
+    Mesh tank  = makeBox(3.5f, 2.0f, 1.6f);
     Mesh floor = makeFloor();
+    Mesh water = makeWaterPlane();
     fishMesh   = makeFishMesh();
 
-    // fish instance buffer (iPos, iDir, iPhaseScale)
+    // Fish instance buffer (iPos, iDir, iPhaseScale)
     initFish();
     glBindVertexArray(fishMesh.vao);
     glBindBuffer(GL_ARRAY_BUFFER, fishInstanceVBO);
@@ -416,10 +444,11 @@ int main() {
     glVertexAttribDivisor(5,1);
     glBindVertexArray(0);
 
-    // bubbles
+    // Bubbles
     initBubbles();
 
     auto uLoc = [&](GLuint p, const char* n){ return glGetUniformLocation(p, n); };
+    glm::vec3 ldir = glm::normalize(glm::vec3(-1.0f,-1.5f,-0.4f));
 
     float last = (float)glfwGetTime();
     while (!glfwWindowShouldClose(win)) {
@@ -432,7 +461,7 @@ int main() {
         updateFish(dt);
         updateBubbles(dt);
 
-        // upload instance data
+        // Upload instance data
         std::vector<float> inst; inst.resize(N_FISH*8);
         for (int i=0;i<N_FISH;++i) {
             glm::vec3 dir = glm::length(fish[i].vel)>1e-6f ? glm::normalize(fish[i].vel) : glm::vec3(0,0,-1);
@@ -440,7 +469,6 @@ int main() {
             inst[o+0]=fish[i].pos.x; inst[o+1]=fish[i].pos.y; inst[o+2]=fish[i].pos.z;
             inst[o+3]=dir.x;         inst[o+4]=dir.y;         inst[o+5]=dir.z;
             inst[o+6]=fish[i].phase; inst[o+7]=fish[i].scale;
-            fish[i].phase += dt * 3.5f;
         }
         glBindBuffer(GL_ARRAY_BUFFER, fishInstanceVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, inst.size()*sizeof(float), inst.data());
@@ -451,15 +479,16 @@ int main() {
         glm::mat4 proj = glm::perspective(glm::radians(60.0f),(float)SCR_W/(float)SCR_H,0.05f,100.0f);
         glm::mat4 view = glm::lookAt(camPos, camPos+camFront, camUp);
 
-        // Tank walls
+        // ---------- Opaque: tank & floor ----------
         glUseProgram(progBasic);
-        glm::vec3 ldir = glm::normalize(glm::vec3(-1.0f,-1.5f,-0.4f));
         glUniformMatrix4fv(uLoc(progBasic,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progBasic,"uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniformMatrix4fv(uLoc(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
-        glUniform3f(uLoc(progBasic,"uColor"), 0.15f,0.35f,0.6f);
         glUniform3f(uLoc(progBasic,"uLightDir"), ldir.x,ldir.y,ldir.z);
         glUniform3f(uLoc(progBasic,"uViewPos"), camPos.x, camPos.y, camPos.z);
+
+        // Tank (blue-ish glass)
+        glUniformMatrix4fv(uLoc(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
+        glUniform3f(uLoc(progBasic,"uColor"), 0.15f,0.35f,0.6f);
         glBindVertexArray(tank.vao);
         glDrawElements(GL_TRIANGLES, tank.idxCount, GL_UNSIGNED_INT, 0);
 
@@ -468,20 +497,7 @@ int main() {
         glBindVertexArray(floor.vao);
         glDrawElements(GL_TRIANGLES, floor.idxCount, GL_UNSIGNED_INT, 0);
 
-        // Water surface
-        glUseProgram(progWater);
-        glUniformMatrix4fv(uLoc(progWater,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
-        glUniformMatrix4fv(uLoc(progWater,"uView"),1,GL_FALSE,glm::value_ptr(view));
-        glUniformMatrix4fv(uLoc(progWater,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
-        glUniform1f(uLoc(progWater,"uTime"), now);
-        glUniform3f(uLoc(progWater,"uDeepColor"), 0.0f, 0.25f, 0.45f);
-        glUniform3f(uLoc(progWater,"uShallowColor"), 0.1f, 0.6f, 0.8f);
-        glBindVertexArray(water.vao);
-        glDisable(GL_CULL_FACE);
-        glDrawElements(GL_TRIANGLES, water.idxCount, GL_UNSIGNED_INT, 0);
-        glEnable(GL_CULL_FACE);
-
-        // Fish (instanced)
+        // ---------- Opaque-ish: fish ----------
         glUseProgram(progFish);
         glUniformMatrix4fv(uLoc(progFish,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progFish,"uView"),1,GL_FALSE,glm::value_ptr(view));
@@ -491,12 +507,25 @@ int main() {
         glBindVertexArray(fishMesh.vao);
         glDrawElementsInstanced(GL_TRIANGLES, fishMesh.idxCount, GL_UNSIGNED_INT, 0, N_FISH);
 
-        // Bubbles
+        // ---------- Alpha: bubbles ----------
         glUseProgram(progBub);
         glUniformMatrix4fv(uLoc(progBub,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
         glUniformMatrix4fv(uLoc(progBub,"uView"),1,GL_FALSE,glm::value_ptr(view));
         glBindVertexArray(bubbleVAO);
         glDrawArrays(GL_POINTS, 0, N_BUB);
+
+        // ---------- Alpha: water LAST ----------
+        glUseProgram(progWater);
+        glUniformMatrix4fv(uLoc(progWater,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
+        glUniformMatrix4fv(uLoc(progWater,"uView"),1,GL_FALSE,glm::value_ptr(view));
+        glUniformMatrix4fv(uLoc(progWater,"uModel"),1,GL_FALSE,glm::value_ptr(glm::mat4(1.0f)));
+        glUniform1f(uLoc(progWater,"uTime"), now);
+        glUniform3f(uLoc(progWater,"uDeepColor"), 0.0f, 0.25f, 0.45f);
+        glUniform3f(uLoc(progWater,"uShallowColor"), 0.1f, 0.6f, 0.8f);
+        glBindVertexArray(water.vao);
+        glDisable(GL_CULL_FACE); // see both sides if camera dips
+        glDrawElements(GL_TRIANGLES, water.idxCount, GL_UNSIGNED_INT, 0);
+        glEnable(GL_CULL_FACE);
 
         glfwSwapBuffers(win);
     }
