@@ -46,14 +46,27 @@ void main(){
     float NdV = max(dot(N,V),0.0);
 
     float metallic  = 0.0;
-    float roughness = (uMaterialType==1) ? 0.85 : 0.80;
+    float roughness = 0.80;
     vec3  base = uBaseColor;
 
-    if (uMaterialType==1){
+    if (uMaterialType==1){ // Rock
         float speck = smoothstep(0.82, 1.0, n3(vWorldPos*18.0)) * 0.25;
         float marble = 0.5 + 0.5*sin(vWorldPos.x*8.0 + vWorldPos.z*6.3 + sin(vWorldPos.y*4.0));
         base = mix(base*0.85, base*1.10, marble) + speck*vec3(0.08,0.07,0.06);
-        roughness = clamp(roughness + (n3(vWorldPos*6.0)-0.5)*0.15, 0.55, 0.95);
+        roughness = clamp(0.85 + (n3(vWorldPos*6.0)-0.5)*0.15, 0.55, 0.95);
+    } else if (uMaterialType==2) { // Coral
+        float coral = 0.5 + 0.5*sin(vWorldPos.x*12.0 + vWorldPos.y*8.0 + vWorldPos.z*10.0);
+        base = mix(base*0.8, base*1.2, coral);
+        roughness = 0.6;
+    } else if (uMaterialType==3) { // Shell
+        float pearl = 0.5 + 0.5*sin(vWorldPos.x*20.0 + vWorldPos.y*15.0);
+        base = mix(base*0.9, base*1.1, pearl);
+        roughness = 0.3;
+        metallic = 0.1;
+    } else if (uMaterialType==4) { // Driftwood
+        float wood = 0.5 + 0.5*sin(vWorldPos.x*6.0 + vWorldPos.z*4.0);
+        base = mix(base*0.7, base*1.3, wood);
+        roughness = 0.9;
     } else {
         if (uApplyCaustics==1) base += 0.12 * caustic(vWorldPos);
     }
