@@ -44,19 +44,19 @@ cmake_force:
 SHELL = /bin/sh
 
 # The CMake executable.
-CMAKE_COMMAND = /usr/local/bin/cmake
+CMAKE_COMMAND = /opt/homebrew/bin/cmake
 
 # The command to remove a file.
-RM = /usr/local/bin/cmake -E rm -f
+RM = /opt/homebrew/bin/cmake -E rm -f
 
 # Escaping for special characters.
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/davidogaranya/3daquarium
+CMAKE_SOURCE_DIR = /Users/da_vinci/Documents/Code_World/3daquarium
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/davidogaranya/3daquarium/build
+CMAKE_BINARY_DIR = /Users/da_vinci/Documents/Code_World/3daquarium/build
 
 # Utility rule file for uninstall.
 
@@ -67,7 +67,7 @@ include _deps/glfw-build/CMakeFiles/uninstall.dir/compiler_depend.make
 include _deps/glfw-build/CMakeFiles/uninstall.dir/progress.make
 
 _deps/glfw-build/CMakeFiles/uninstall:
-	cd /Users/davidogaranya/3daquarium/build/_deps/glfw-build && /usr/local/bin/cmake -P /Users/davidogaranya/3daquarium/build/_deps/glfw-build/cmake_uninstall.cmake
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build && /opt/homebrew/bin/cmake -P /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/cmake_uninstall.cmake
 
 _deps/glfw-build/CMakeFiles/uninstall.dir/codegen:
 .PHONY : _deps/glfw-build/CMakeFiles/uninstall.dir/codegen
@@ -81,10 +81,10 @@ _deps/glfw-build/CMakeFiles/uninstall.dir/build: uninstall
 .PHONY : _deps/glfw-build/CMakeFiles/uninstall.dir/build
 
 _deps/glfw-build/CMakeFiles/uninstall.dir/clean:
-	cd /Users/davidogaranya/3daquarium/build/_deps/glfw-build && $(CMAKE_COMMAND) -P CMakeFiles/uninstall.dir/cmake_clean.cmake
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build && $(CMAKE_COMMAND) -P CMakeFiles/uninstall.dir/cmake_clean.cmake
 .PHONY : _deps/glfw-build/CMakeFiles/uninstall.dir/clean
 
 _deps/glfw-build/CMakeFiles/uninstall.dir/depend:
-	cd /Users/davidogaranya/3daquarium/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/davidogaranya/3daquarium /Users/davidogaranya/3daquarium/build/_deps/glfw-src /Users/davidogaranya/3daquarium/build /Users/davidogaranya/3daquarium/build/_deps/glfw-build /Users/davidogaranya/3daquarium/build/_deps/glfw-build/CMakeFiles/uninstall.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/da_vinci/Documents/Code_World/3daquarium /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src /Users/da_vinci/Documents/Code_World/3daquarium/build /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/CMakeFiles/uninstall.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : _deps/glfw-build/CMakeFiles/uninstall.dir/depend
 

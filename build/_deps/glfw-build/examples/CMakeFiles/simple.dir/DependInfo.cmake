@@ -8,8 +8,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/Users/davidogaranya/3daquarium/build/_deps/glfw-src/deps/glad_gl.c" "_deps/glfw-build/examples/CMakeFiles/simple.dir/__/deps/glad_gl.c.o" "gcc" "_deps/glfw-build/examples/CMakeFiles/simple.dir/__/deps/glad_gl.c.o.d"
-  "/Users/davidogaranya/3daquarium/build/_deps/glfw-src/examples/simple.c" "_deps/glfw-build/examples/CMakeFiles/simple.dir/simple.c.o" "gcc" "_deps/glfw-build/examples/CMakeFiles/simple.dir/simple.c.o.d"
+  "/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/deps/glad_gl.c" "_deps/glfw-build/examples/CMakeFiles/simple.dir/__/deps/glad_gl.c.o" "gcc" "_deps/glfw-build/examples/CMakeFiles/simple.dir/__/deps/glad_gl.c.o.d"
+  "/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/examples/simple.c" "_deps/glfw-build/examples/CMakeFiles/simple.dir/simple.c.o" "gcc" "_deps/glfw-build/examples/CMakeFiles/simple.dir/simple.c.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

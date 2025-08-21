@@ -4,7 +4,9 @@
 # compile C with /usr/bin/cc
 C_DEFINES = -D_GLFW_USE_CONFIG_H
 
-C_INCLUDES = -I/Users/davidogaranya/3daquarium/build/_deps/glfw-src/include -I/Users/davidogaranya/3daquarium/build/_deps/glfw-src/src -I/Users/davidogaranya/3daquarium/build/_deps/glfw-build/src
+C_INCLUDES = -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/include -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/src -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/src
 
-C_FLAGS = -std=gnu99 -fPIC -Wall
+C_FLAGSarm64 = -std=gnu99 -arch arm64 -fPIC -Wall
+
+C_FLAGS = -std=gnu99 -arch arm64 -fPIC -Wall
 

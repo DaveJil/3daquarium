@@ -4,7 +4,9 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/Users/davidogaranya/3daquarium/build/_deps/glm-src
+CXX_INCLUDES = -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glm-src
 
-CXX_FLAGS = -std=c++17 -Wno-c++98-compat -Wno-c++98-compat-pedantic
+CXX_FLAGSarm64 = -std=c++17 -arch arm64 -Wno-c++98-compat -Wno-c++98-compat-pedantic
+
+CXX_FLAGS = -std=c++17 -arch arm64 -Wno-c++98-compat -Wno-c++98-compat-pedantic
 

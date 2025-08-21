@@ -1,4 +1,4 @@
-# Install script for directory: /Users/davidogaranya/3daquarium
+# Install script for directory: /Users/da_vinci/Documents/Code_World/3daquarium
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -39,18 +39,18 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/davidogaranya/3daquarium/build/_deps/glfw-build/cmake_install.cmake")
+  include("/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/davidogaranya/3daquarium/build/_deps/glm-build/cmake_install.cmake")
+  include("/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glm-build/cmake_install.cmake")
 endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/Users/davidogaranya/3daquarium/build/install_local_manifest.txt"
+  file(WRITE "/Users/da_vinci/Documents/Code_World/3daquarium/build/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -66,6 +66,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/Users/davidogaranya/3daquarium/build/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/Users/da_vinci/Documents/Code_World/3daquarium/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

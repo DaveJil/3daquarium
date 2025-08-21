@@ -1,4 +1,4 @@
-# Install script for directory: /Users/davidogaranya/3daquarium/build/_deps/glm-src/glm
+# Install script for directory: /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glm-src/glm
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -40,6 +40,6 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/Users/davidogaranya/3daquarium/build/_deps/glm-build/glm/install_local_manifest.txt"
+  file(WRITE "/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glm-build/glm/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

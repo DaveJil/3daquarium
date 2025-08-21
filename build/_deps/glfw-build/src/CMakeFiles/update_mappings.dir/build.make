@@ -44,19 +44,19 @@ cmake_force:
 SHELL = /bin/sh
 
 # The CMake executable.
-CMAKE_COMMAND = /usr/local/bin/cmake
+CMAKE_COMMAND = /opt/homebrew/bin/cmake
 
 # The command to remove a file.
-RM = /usr/local/bin/cmake -E rm -f
+RM = /opt/homebrew/bin/cmake -E rm -f
 
 # Escaping for special characters.
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/davidogaranya/3daquarium
+CMAKE_SOURCE_DIR = /Users/da_vinci/Documents/Code_World/3daquarium
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/davidogaranya/3daquarium/build
+CMAKE_BINARY_DIR = /Users/da_vinci/Documents/Code_World/3daquarium/build
 
 # Utility rule file for update_mappings.
 
@@ -67,8 +67,8 @@ include _deps/glfw-build/src/CMakeFiles/update_mappings.dir/compiler_depend.make
 include _deps/glfw-build/src/CMakeFiles/update_mappings.dir/progress.make
 
 _deps/glfw-build/src/CMakeFiles/update_mappings:
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/davidogaranya/3daquarium/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Updating gamepad mappings from upstream repository"
-	cd /Users/davidogaranya/3daquarium/build/_deps/glfw-src/src && /usr/local/bin/cmake -P /Users/davidogaranya/3daquarium/build/_deps/glfw-src/CMake/GenerateMappings.cmake mappings.h.in mappings.h
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/da_vinci/Documents/Code_World/3daquarium/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Updating gamepad mappings from upstream repository"
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/src && /opt/homebrew/bin/cmake -P /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/CMake/GenerateMappings.cmake mappings.h.in mappings.h
 
 _deps/glfw-build/src/CMakeFiles/update_mappings.dir/codegen:
 .PHONY : _deps/glfw-build/src/CMakeFiles/update_mappings.dir/codegen
@@ -82,10 +82,10 @@ _deps/glfw-build/src/CMakeFiles/update_mappings.dir/build: update_mappings
 .PHONY : _deps/glfw-build/src/CMakeFiles/update_mappings.dir/build
 
 _deps/glfw-build/src/CMakeFiles/update_mappings.dir/clean:
-	cd /Users/davidogaranya/3daquarium/build/_deps/glfw-build/src && $(CMAKE_COMMAND) -P CMakeFiles/update_mappings.dir/cmake_clean.cmake
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/src && $(CMAKE_COMMAND) -P CMakeFiles/update_mappings.dir/cmake_clean.cmake
 .PHONY : _deps/glfw-build/src/CMakeFiles/update_mappings.dir/clean
 
 _deps/glfw-build/src/CMakeFiles/update_mappings.dir/depend:
-	cd /Users/davidogaranya/3daquarium/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/davidogaranya/3daquarium /Users/davidogaranya/3daquarium/build/_deps/glfw-src/src /Users/davidogaranya/3daquarium/build /Users/davidogaranya/3daquarium/build/_deps/glfw-build/src /Users/davidogaranya/3daquarium/build/_deps/glfw-build/src/CMakeFiles/update_mappings.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /Users/da_vinci/Documents/Code_World/3daquarium/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/da_vinci/Documents/Code_World/3daquarium /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/src /Users/da_vinci/Documents/Code_World/3daquarium/build /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/src /Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-build/src/CMakeFiles/update_mappings.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : _deps/glfw-build/src/CMakeFiles/update_mappings.dir/depend
 

@@ -1,7 +1,7 @@
 {
 	"InstallScripts" : 
 	[
-		"/Users/davidogaranya/3daquarium/build/_deps/glfw-subbuild/cmake_install.cmake"
+		"/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-subbuild/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

@@ -4,7 +4,9 @@
 # compile C with /usr/bin/cc
 C_DEFINES = 
 
-C_INCLUDES = -I/Users/davidogaranya/3daquarium/build/_deps/glfw-src/deps -I/Users/davidogaranya/3daquarium/build/_deps/glfw-src/include
+C_INCLUDES = -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/deps -I/Users/da_vinci/Documents/Code_World/3daquarium/build/_deps/glfw-src/include
 
-C_FLAGS = -std=gnu99
+C_FLAGSarm64 = -std=gnu99 -arch arm64
+
+C_FLAGS = -std=gnu99 -arch arm64
 
