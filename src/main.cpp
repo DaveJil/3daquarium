@@ -3,6 +3,8 @@
 #include <random>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 
 #ifdef __APPLE__
   #define GL_SILENCE_DEPRECATION
@@ -22,7 +24,7 @@
 static int SCR_W = 1280, SCR_H = 720;
 
 static float camYaw = -90.0f, camPitch = -5.0f;
-static glm::vec3 camPos(0.0f, 0.10f, 0.35f);
+static glm::vec3 camPos(0.0f, 0.20f, 0.6f);
 static glm::vec3 camFront(0.0f, 0.0f, -1.0f);
 static glm::vec3 camUp(0.0f, 1.0f, 0.0f);
 static bool firstMouse = true;
@@ -137,10 +139,191 @@ static std::string loadFile(const char* path) {
     return s;
 }
 
+
+
 // ===========================================================
 // Geometry
 // ===========================================================
 struct Mesh { GLuint vao=0, vbo=0, ebo=0; GLsizei idxCount=0; };
+
+// Simple fallback mesh for OBJ loader
+static Mesh createFallbackMesh() {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    auto push = [&](const glm::vec3& p, const glm::vec3& n){ v.push_back({p, glm::normalize(n)}); };
+
+    const int segX=24, segR=20;
+    const float rMax=0.065f, zFlatten=0.65f;
+    for (int i=0; i<=segX; ++i) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.02f, 0.0f, 1.0f)), 0.75f);
+        if (i == 0) r *= 0.6f;
+        for (int j=0; j<=segR; ++j) {
+            float a = (2.0f * 3.14159f) * (float)j / (float)segR;
+            float cy = std::cos(a), sy = std::sin(a);
+            glm::vec3 p = { t, r * cy, zFlatten * r * sy };
+            glm::vec3 n = { 0.0f, cy, (1.0f / zFlatten) * sy };
+            push(p, n);
+        }
+    }
+    int ring = segR + 1;
+    for (int i=0; i<segX; ++i) for (int j=0; j<segR; ++j) {
+        unsigned a = i*ring + j, b=a+1, c=(i+1)*ring + j, d=c+1;
+        idx.insert(idx.end(), {a,c,b, b,c,d});
+    }
+
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
+
+// Simple OBJ loader for fish models
+static Mesh loadOBJModel(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open OBJ file: " << filename << std::endl;
+        return createFallbackMesh(); // Fallback to basic mesh
+    }
+    
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> texcoords;
+    std::vector<unsigned> indices;
+    
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string type;
+        iss >> type;
+        
+        if (type == "v") {
+            float x, y, z;
+            iss >> x >> y >> z;
+            positions.push_back(glm::vec3(x, y, z));
+        } else if (type == "vn") {
+            float x, y, z;
+            iss >> x >> y >> z;
+            normals.push_back(glm::normalize(glm::vec3(x, y, z)));
+        } else if (type == "vt") {
+            float u, v;
+            iss >> u >> v;
+            // Skip texture coordinates - we're not using them
+            // texcoords.push_back(glm::vec2(u, v));
+        } else if (type == "f") {
+            std::string vertex;
+            for (int i = 0; i < 3; ++i) {
+                iss >> vertex;
+                std::istringstream viss(vertex);
+                std::string index_str;
+                std::vector<int> indices_vertex;
+                
+                while (std::getline(viss, index_str, '/')) {
+                    if (index_str.empty()) {
+                        indices_vertex.push_back(0);
+                    } else {
+                        indices_vertex.push_back(std::stoi(index_str) - 1);
+                    }
+                }
+                
+                while (indices_vertex.size() < 3) {
+                    indices_vertex.push_back(0);
+                }
+                
+                indices.push_back(indices_vertex[0]);
+            }
+        }
+    }
+    
+    if (positions.empty()) {
+        std::cerr << "No vertices found in OBJ file: " << filename << std::endl;
+        return createFallbackMesh(); // Fallback
+    }
+    
+    // Calculate bounding box to determine scale
+    glm::vec3 minPos = positions[0], maxPos = positions[0];
+    for (const auto& pos : positions) {
+        minPos = glm::min(minPos, pos);
+        maxPos = glm::max(maxPos, pos);
+    }
+    glm::vec3 size = maxPos - minPos;
+    float maxSize = std::max({size.x, size.y, size.z});
+    // Use a much larger scale to make fish clearly visible
+    float scale = 0.2f; // Much larger scale for all fish models
+    
+    std::cout << "Loaded OBJ: " << filename << std::endl;
+    std::cout << "  Vertices: " << positions.size() << std::endl;
+    std::cout << "  Bounding box: " << minPos.x << "," << minPos.y << "," << minPos.z 
+              << " to " << maxPos.x << "," << maxPos.y << "," << maxPos.z << std::endl;
+    std::cout << "  Size: " << size.x << "x" << size.y << "x" << size.z << std::endl;
+    std::cout << "  Scale factor: " << scale << std::endl;
+    
+    // Create mesh from loaded data with scaling
+    struct V { glm::vec3 p, n; };
+    std::vector<V> vertices;
+    
+    for (size_t i = 0; i < positions.size(); ++i) {
+        V v;
+        v.p = positions[i] * scale; // Apply scaling
+        v.n = (i < normals.size()) ? normals[i] : glm::vec3(0, 1, 0);
+        vertices.push_back(v);
+    }
+    
+    Mesh m;
+    glGenVertexArrays(1, &m.vao);
+    glBindVertexArray(m.vao);
+    
+    glGenBuffers(1, &m.vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(V), vertices.data(), GL_STATIC_DRAW);
+    
+    if (!indices.empty()) {
+        glGenBuffers(1, &m.ebo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned), indices.data(), GL_STATIC_DRAW);
+        m.idxCount = (GLsizei)indices.size();
+    } else {
+        m.idxCount = (GLsizei)vertices.size();
+    }
+    
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V, n));
+    
+    // Set up instancing attributes for fish
+    glEnableVertexAttribArray(3); // iPos
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)0);
+    glVertexAttribDivisor(3, 1);
+    
+    glEnableVertexAttribArray(4); // iDir
+    glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)(3*sizeof(float)));
+    glVertexAttribDivisor(4, 1);
+    
+    glEnableVertexAttribArray(5); // iPhaseScale
+    glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)(6*sizeof(float)));
+    glVertexAttribDivisor(5, 1);
+    
+    glEnableVertexAttribArray(6); // iStretch
+    glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)(8*sizeof(float)));
+    glVertexAttribDivisor(6, 1);
+    
+    glEnableVertexAttribArray(7); // iColor
+    glVertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)(11*sizeof(float)));
+    glVertexAttribDivisor(7, 1);
+    
+    glEnableVertexAttribArray(8); // iSpecies
+    glVertexAttribPointer(8, 1, GL_FLOAT, GL_FALSE, 15*sizeof(float), (void*)(14*sizeof(float)));
+    glVertexAttribDivisor(8, 1);
+    
+    glBindVertexArray(0);
+    return m;
+}
 
 static Mesh makeBox(float w, float h, float d) {
     float x=w*0.5f, y=h*0.5f, z=d*0.5f;
@@ -261,6 +444,140 @@ static Mesh makeFishMesh() {
     m.idxCount=(GLsizei)idx.size();
     glBindVertexArray(0); return m;
 }
+
+// Create realistic fish meshes for different species
+static Mesh makeClownfishMesh() {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    auto push = [&](const glm::vec3& p, const glm::vec3& n){ v.push_back({p, glm::normalize(n)}); };
+
+    // More detailed clownfish body
+    const int segX=32, segR=24;
+    const float rMax=0.07f, zFlatten=0.6f;
+    for (int i=0; i<=segX; ++i) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.1f, 0.0f, 1.0f)), 0.8f);
+        if (i == 0) r *= 0.5f; // Smaller head
+        for (int j=0; j<=segR; ++j) {
+            float a = (2.0f * 3.14159f) * (float)j / (float)segR;
+            float cy = std::cos(a), sy = std::sin(a);
+            glm::vec3 p = { t, r * cy, zFlatten * r * sy };
+            glm::vec3 n = { 0.0f, cy, (1.0f / zFlatten) * sy };
+            push(p, n);
+        }
+    }
+    
+    // Body triangles
+    int ring = segR + 1;
+    for (int i=0; i<segX; ++i) for (int j=0; j<segR; ++j) {
+        unsigned a = i*ring + j, b=a+1, c=(i+1)*ring + j, d=c+1;
+        idx.insert(idx.end(), {a,c,b, b,c,d});
+    }
+    
+    // Dorsal fin
+    for (int i=8; i<segX-4; i+=2) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.1f, 0.0f, 1.0f)), 0.8f);
+        glm::vec3 base = {t, r, 0.0f};
+        glm::vec3 tip = {t, r + 0.08f, 0.0f};
+        unsigned baseIdx = i*ring + segR/2;
+        unsigned tipIdx = (unsigned)v.size();
+        v.push_back({tip, glm::vec3(0,1,0)});
+        if (i > 8) {
+            unsigned prevTip = tipIdx - 1;
+            idx.insert(idx.end(), {baseIdx, tipIdx, prevTip});
+        }
+    }
+    
+    // Tail fin (more detailed)
+    float x = 1.1f;
+    glm::vec3 tU = {x,  0.18f,  0.0f}, tD = {x, -0.18f,  0.0f};
+    glm::vec3 baseL = {1.0f,  0.05f,  0.03f}, baseR = {1.0f, -0.05f,  0.03f};
+    glm::vec3 baseL2= {1.0f,  0.05f, -0.03f}, baseR2= {1.0f, -0.05f, -0.03f};
+    unsigned s = (unsigned)v.size();
+    v.push_back({tU,{0,0, 1}}); v.push_back({tD,{0,0, 1}}); v.push_back({baseL,{0,0, 1}}); v.push_back({baseR,{0,0, 1}});
+    v.push_back({tU,{0,0,-1}}); v.push_back({tD,{0,0,-1}}); v.push_back({baseL2,{0,0,-1}}); v.push_back({baseR2,{0,0,-1}});
+    idx.insert(idx.end(), {s+2,s+0,s+1,  s+2,s+1,s+3});
+    idx.insert(idx.end(), {s+5,s+7,s+4,  s+5,s+6,s+7});
+
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
+
+static Mesh makeAngelfishMesh() {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    auto push = [&](const glm::vec3& p, const glm::vec3& n){ v.push_back({p, glm::normalize(n)}); };
+
+    // Angelfish have a more triangular, compressed body
+    const int segX=28, segR=20;
+    const float rMax=0.08f, zFlatten=0.4f; // More compressed
+    for (int i=0; i<=segX; ++i) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.2f, 0.0f, 1.0f)), 0.7f);
+        if (i == 0) r *= 0.4f; // Very small head
+        for (int j=0; j<=segR; ++j) {
+            float a = (2.0f * 3.14159f) * (float)j / (float)segR;
+            float cy = std::cos(a), sy = std::sin(a);
+            glm::vec3 p = { t, r * cy, zFlatten * r * sy };
+            glm::vec3 n = { 0.0f, cy, (1.0f / zFlatten) * sy };
+            push(p, n);
+        }
+    }
+    
+    int ring = segR + 1;
+    for (int i=0; i<segX; ++i) for (int j=0; j<segR; ++j) {
+        unsigned a = i*ring + j, b=a+1, c=(i+1)*ring + j, d=c+1;
+        idx.insert(idx.end(), {a,c,b, b,c,d});
+    }
+    
+    // Large dorsal fin
+    for (int i=6; i<segX-2; i++) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.2f, 0.0f, 1.0f)), 0.7f);
+        glm::vec3 base = {t, r, 0.0f};
+        glm::vec3 tip = {t, r + 0.15f, 0.0f}; // Much larger fin
+        unsigned baseIdx = i*ring + segR/2;
+        unsigned tipIdx = (unsigned)v.size();
+        v.push_back({tip, glm::vec3(0,1,0)});
+        if (i > 6) {
+            unsigned prevTip = tipIdx - 1;
+            idx.insert(idx.end(), {baseIdx, tipIdx, prevTip});
+        }
+    }
+    
+    // Anal fin
+    for (int i=segX/2; i<segX-2; i++) {
+        float t = (float)i / (float)segX;
+        float r = rMax * std::pow(std::sin(3.14159f * std::clamp(t*1.2f, 0.0f, 1.0f)), 0.7f);
+        glm::vec3 base = {t, -r, 0.0f};
+        glm::vec3 tip = {t, -r - 0.12f, 0.0f};
+        unsigned baseIdx = i*ring + segR/2;
+        unsigned tipIdx = (unsigned)v.size();
+        v.push_back({tip, glm::vec3(0,-1,0)});
+        if (i > segX/2) {
+            unsigned prevTip = tipIdx - 1;
+            idx.insert(idx.end(), {baseIdx, tipIdx, prevTip});
+        }
+    }
+
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
 static Mesh makePlantStrip(int segments = 12, float height = 0.6f, float width = 0.027f) {
     struct V { glm::vec3 p,n; };
     std::vector<V> v;
@@ -318,10 +635,130 @@ static Mesh makeRockDome(int rings=12, int sectors=18, float radius=0.22f) {
     glBindVertexArray(0); return m;
 }
 
+static Mesh makeCoral(int segments = 8, float height = 0.4f, float baseRadius = 0.08f) {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    
+    for (int i=0; i<=segments; ++i) {
+        float t = (float)i/segments;
+        float y = t * height;
+        float radius = baseRadius * (1.0f - t * 0.3f) + 0.02f * std::sin(t * 8.0f);
+        
+        for (int j=0; j<=8; ++j) {
+            float angle = (2.0f * 3.14159f) * (float)j / 8.0f;
+            float x = radius * std::cos(angle);
+            float z = radius * std::sin(angle);
+            
+            glm::vec3 p(x, y, z);
+            glm::vec3 n = glm::normalize(glm::vec3(x, 0.1f, z));
+            v.push_back({p, n});
+        }
+    }
+    
+    for (int i=0; i<segments; ++i) {
+        for (int j=0; j<8; ++j) {
+            unsigned a = i*9 + j, b = a+1, c = (i+1)*9 + j, d = c+1;
+            if (j == 7) { b = i*9; d = (i+1)*9; }
+            idx.insert(idx.end(), {a,c,b, b,c,d});
+        }
+    }
+    
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
+
+static Mesh makeShell(float radius = 0.12f, float height = 0.08f) {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    
+    const int rings = 6, sectors = 12;
+    for (int r=0; r<=rings; ++r) {
+        float vr = (float)r/rings;
+        float phi = vr * 3.14159f * 0.3f;
+        float r_radius = radius * (1.0f - vr * 0.3f);
+        
+        for (int s=0; s<=sectors; ++s) {
+            float vs = (float)s/sectors;
+            float theta = vs * 2.0f * 3.14159f;
+            float x = r_radius * std::cos(theta);
+            float y = height * std::sin(phi);
+            float z = r_radius * std::sin(theta);
+            
+            glm::vec3 p(x, y, z);
+            glm::vec3 n = glm::normalize(glm::vec3(x, 0.5f, z));
+            v.push_back({p, n});
+        }
+    }
+    
+    int ring = sectors+1;
+    for (int r=0; r<rings; ++r) {
+        for (int s=0; s<sectors; ++s) {
+            unsigned a = r*ring + s, b = a+1, c = (r+1)*ring + s, d = c+1;
+            idx.insert(idx.end(), {a,c,b, b,c,d});
+        }
+    }
+    
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
+
+static Mesh makeDriftwood(int segments = 6, float length = 0.3f, float radius = 0.04f) {
+    struct V { glm::vec3 p,n; };
+    std::vector<V> v; std::vector<unsigned> idx;
+    
+    for (int i=0; i<=segments; ++i) {
+        float t = (float)i/segments;
+        float x = t * length;
+        float r = radius * (1.0f - t * 0.4f);
+        
+        for (int j=0; j<=8; ++j) {
+            float angle = (2.0f * 3.14159f) * (float)j / 8.0f;
+            float y = r * std::cos(angle);
+            float z = r * std::sin(angle);
+            
+            glm::vec3 p(x, y, z);
+            glm::vec3 n = glm::normalize(glm::vec3(0.1f, y, z));
+            v.push_back({p, n});
+        }
+    }
+    
+    for (int i=0; i<segments; ++i) {
+        for (int j=0; j<8; ++j) {
+            unsigned a = i*9 + j, b = a+1, c = (i+1)*9 + j, d = c+1;
+            if (j == 7) { b = i*9; d = (i+1)*9; }
+            idx.insert(idx.end(), {a,c,b, b,c,d});
+        }
+    }
+    
+    Mesh m; glGenVertexArrays(1,&m.vao); glBindVertexArray(m.vao);
+    glGenBuffers(1,&m.vbo); glBindBuffer(GL_ARRAY_BUFFER,m.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size()*sizeof(V), v.data(), GL_STATIC_DRAW);
+    glGenBuffers(1,&m.ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size()*sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),(void*)offsetof(V,n));
+    m.idxCount=(GLsizei)idx.size();
+    glBindVertexArray(0); return m;
+}
+
 // ===========================================================
 // Species/instances
 // ===========================================================
-enum Species : int { CLOWNFISH=0, NEON_TETRA=1, ZEBRA_DANIO=2 };
+enum Species : int { CLOWNFISH=0, NEON_TETRA=1, ZEBRA_DANIO=2, ANGELFISH=3, GOLDFISH=4, BETTA=5, GUPPY=6, PLATY=7 };
 struct FishInst {
     glm::vec3 pos, vel;
     float phase;
@@ -330,15 +767,15 @@ struct FishInst {
     glm::vec3 color;
     float species;
 };
-static std::vector<FishInst> clownfish, neon, danio;
-static GLuint vboClown=0, vboNeon=0, vboDanio=0;
+static std::vector<FishInst> clownfish, neon, danio, angelfish, goldfish, betta, guppy, platy;
+static GLuint vboClown=0, vboNeon=0, vboDanio=0, vboAngelfish=0, vboGoldfish=0, vboBetta=0, vboGuppy=0, vboPlaty=0;
 
-static Mesh fishMesh, plantMesh, tankMesh, floorMesh, waterMesh, rockMesh;
-static const glm::vec3 TANK_EXTENTS = {3.5f*0.5f - 0.05f, 0.95f, 1.8f*0.5f - 0.05f};
-static float waterY = 0.45f;
+static Mesh fishMesh, clownfishMesh, angelfishMesh, plantMesh, tankMesh, floorMesh, waterMesh, rockMesh, coralMesh, shellMesh, driftwoodMesh;
+static const glm::vec3 TANK_EXTENTS = {5.0f*0.5f - 0.05f, 1.4f, 3.0f*0.5f - 0.05f};
+static float waterY = 0.85f;
 
-static int N_CLOWN = 10, N_NEON = 20, N_DANIO = 15;
-static int N_PLANTS = 60, N_ROCKS = 8;
+static int N_CLOWN = 8, N_NEON = 15, N_DANIO = 12, N_ANGELFISH = 6, N_GOLDFISH = 4, N_BETTA = 3, N_GUPPY = 10, N_PLATY = 8;
+static int N_PLANTS = 80, N_ROCKS = 12, N_CORALS = 8, N_SHELLS = 15, N_DRIFTWOOD = 6;
 
 static GLuint plantVBO=0;
 static std::vector<glm::vec3> plantPos;
@@ -346,6 +783,9 @@ static std::vector<glm::vec2> plantHP;
 static std::vector<glm::vec3> plantColor;
 
 static std::vector<glm::vec4> rocks;
+static std::vector<glm::vec4> corals;
+static std::vector<glm::vec4> shells;
+static std::vector<glm::vec4> driftwood;
 
 static std::mt19937 rng(2025);
 static std::uniform_real_distribution<float> urand(-1.0f, 1.0f);
@@ -379,7 +819,7 @@ static void initPlantsAndRocks() {
         float h = 0.35f + urand01(rng)*0.55f;
         float phase = urand01(rng)*6.28318f;
         glm::vec3 col = glm::vec3(0.18f + urand01(rng)*0.1f, 0.55f + urand01(rng)*0.35f, 0.18f);
-        plantPos[i]   = glm::vec3(x, -0.9f, z);
+        plantPos[i]   = glm::vec3(x, -1.4f, z);
         plantHP[i]    = glm::vec2(h, phase);
         plantColor[i] = col;
     }
@@ -390,7 +830,31 @@ static void initPlantsAndRocks() {
         float x = urand(rng)*TANK_EXTENTS.x*0.75f;
         float z = urand(rng)*TANK_EXTENTS.z*0.75f;
         float r = 0.12f + urand01(rng)*0.22f;
-        rocks[i] = glm::vec4(x, -0.9f, z, r);
+        rocks[i] = glm::vec4(x, -1.4f, z, r);
+    }
+    
+    corals.resize(N_CORALS);
+    for (int i=0;i<N_CORALS;++i) {
+        float x = urand(rng)*TANK_EXTENTS.x*0.7f;
+        float z = urand(rng)*TANK_EXTENTS.z*0.7f;
+        float r = 0.15f + urand01(rng)*0.25f;
+        corals[i] = glm::vec4(x, -1.4f, z, r);
+    }
+    
+    shells.resize(N_SHELLS);
+    for (int i=0;i<N_SHELLS;++i) {
+        float x = urand(rng)*TANK_EXTENTS.x*0.8f;
+        float z = urand(rng)*TANK_EXTENTS.z*0.8f;
+        float r = 0.08f + urand01(rng)*0.12f;
+        shells[i] = glm::vec4(x, -1.4f, z, r);
+    }
+    
+    driftwood.resize(N_DRIFTWOOD);
+    for (int i=0;i<N_DRIFTWOOD;++i) {
+        float x = urand(rng)*TANK_EXTENTS.x*0.6f;
+        float z = urand(rng)*TANK_EXTENTS.z*0.6f;
+        float r = 0.2f + urand01(rng)*0.3f;
+        driftwood[i] = glm::vec4(x, -1.4f, z, r);
     }
 }
 static void setupFishInstancing(GLuint &instVBO, const Mesh& m, int count) {
@@ -419,7 +883,7 @@ static void initBubbles() {
     for (int i=0;i<N_BUB;++i) {
         float x = urand(rng)*TANK_EXTENTS.x*0.7f;
         float z = urand(rng)*TANK_EXTENTS.z*0.7f;
-        float y = -0.9f + urand01(rng)*0.2f;
+        float y = -1.4f + urand01(rng)*0.3f;
         bubblePos[i] = glm::vec3(x,y,z);
     }
     glGenVertexArrays(1,&bubbleVAO);
@@ -436,7 +900,7 @@ static void updateBubbles(float dt) {
         bubblePos[i].y += (0.28f + 0.18f*urand01(rng)) * dt;
         bubblePos[i].x += 0.06f * std::sin(glfwGetTime()*2.2f + i*0.31f) * dt;
         if (bubblePos[i].y > waterY - 0.02f) {
-            bubblePos[i].y = -0.9f + urand01(rng)*0.12f;
+            bubblePos[i].y = -1.4f + urand01(rng)*0.2f;
             bubblePos[i].x = urand(rng)*TANK_EXTENTS.x*0.6f;
             bubblePos[i].z = urand(rng)*TANK_EXTENTS.z*0.6f;
         }
@@ -660,31 +1124,74 @@ int main(){
     progBRDF    = linkProgram(vs_tri, fs_brdf,    "progBRDF");
 
     // ---------- geometry ----------
-    tankMesh  = makeBox(3.5f, 2.2f, 1.8f);
-    floorMesh = makeFloor();
-    waterMesh = makeWaterPlane();
-    fishMesh  = makeFishMesh();
+    tankMesh  = makeBox(5.0f, 2.8f, 3.0f);
+    floorMesh = makeFloor(5.0f, 3.0f, -1.4f);
+    waterMesh = makeWaterPlane(160, 160, 5.0f, 3.0f, waterY);
+    
+    // Load realistic OBJ fish models
+    std::cout << "Loading fish models..." << std::endl;
+    fishMesh  = loadOBJModel("../models/fish.obj");           // Generic fish for most species
+    clownfishMesh = loadOBJModel("../models/koi_fish.obj");   // Koi for clownfish (orange/reddish)
+    angelfishMesh = loadOBJModel("../models/bream_fish__dorade_royale.obj"); // Bream for angelfish (silver/blue)
+    
+    // Create additional mesh for animated fish model
+    Mesh animatedFishMesh = loadOBJModel("../models/fish_animated.obj"); // For goldfish (more detailed)
+    std::cout << "Fish models loaded!" << std::endl;
+    std::cout << "Fish counts: Clown=" << N_CLOWN << ", Neon=" << N_NEON << ", Danio=" << N_DANIO 
+              << ", Angelfish=" << N_ANGELFISH << ", Goldfish=" << N_GOLDFISH 
+              << ", Betta=" << N_BETTA << ", Guppy=" << N_GUPPY << ", Platy=" << N_PLATY << std::endl;
+    std::cout << "Tank extents: " << TANK_EXTENTS.x << "x" << TANK_EXTENTS.y << "x" << TANK_EXTENTS.z << std::endl;
+    std::cout << "Water level: " << waterY << std::endl;
+    
     plantMesh = makePlantStrip();
     rockMesh  = makeRockDome();
+    coralMesh = makeCoral();
+    shellMesh = makeShell();
+    driftwoodMesh = makeDriftwood();
 
     // ---------- species ----------
     auto initSpeciesVec_ = ::initSpeciesVec;
     initSpeciesVec_(clownfish, N_CLOWN, CLOWNFISH,
                     {1.0f,0.55f,0.20f}, {0.2f,0.1f,0.1f},
                     {1.2f,0.9f,1.0f},   {0.25f,0.1f,0.2f},
-                    0.6f,1.2f, -0.55f,  waterY-0.09f, 0.85f, 1.10f);
+                    0.6f,1.2f, -1.0f,  waterY-0.09f, 0.85f, 1.10f);
     initSpeciesVec_(neon, N_NEON, NEON_TETRA,
                     {0.20f,0.85f,1.0f}, {0.2f,0.2f,0.2f},
                     {1.0f,0.7f,0.8f},   {0.2f,0.15f,0.15f},
-                    0.7f,1.6f, -0.5f,   waterY-0.07f, 0.55f, 0.75f);
+                    0.7f,1.6f, -0.9f,   waterY-0.07f, 0.55f, 0.75f);
     initSpeciesVec_(danio, N_DANIO, ZEBRA_DANIO,
                     {0.9f,0.85f,0.55f}, {0.2f,0.2f,0.2f},
                     {1.3f,0.8f,0.9f},   {0.25f,0.12f,0.2f},
-                    0.8f,1.8f, -0.5f,   waterY-0.07f, 0.65f, 0.9f);
+                    0.8f,1.8f, -0.9f,   waterY-0.07f, 0.65f, 0.9f);
+    initSpeciesVec_(angelfish, N_ANGELFISH, ANGELFISH,
+                    {0.8f,0.8f,0.9f}, {0.3f,0.3f,0.3f},
+                    {1.5f,1.2f,0.6f},   {0.3f,0.2f,0.1f},
+                    0.5f,1.0f, -0.8f,   waterY-0.12f, 1.1f, 1.3f);
+    initSpeciesVec_(goldfish, N_GOLDFISH, GOLDFISH,
+                    {1.0f,0.7f,0.2f}, {0.2f,0.1f,0.1f},
+                    {1.1f,0.9f,1.0f},   {0.2f,0.15f,0.2f},
+                    0.4f,0.8f, -0.7f,   waterY-0.15f, 1.2f, 1.4f);
+    initSpeciesVec_(betta, N_BETTA, BETTA,
+                    {0.8f,0.3f,0.8f}, {0.3f,0.2f,0.3f},
+                    {1.0f,1.4f,0.7f},   {0.2f,0.3f,0.15f},
+                    0.6f,1.1f, -0.6f,   waterY-0.08f, 0.9f, 1.1f);
+    initSpeciesVec_(guppy, N_GUPPY, GUPPY,
+                    {0.3f,0.8f,0.9f}, {0.2f,0.3f,0.2f},
+                    {0.8f,0.6f,0.7f},   {0.15f,0.1f,0.15f},
+                    0.8f,1.4f, -0.8f,   waterY-0.05f, 0.4f, 0.6f);
+    initSpeciesVec_(platy, N_PLATY, PLATY,
+                    {0.9f,0.4f,0.6f}, {0.2f,0.2f,0.2f},
+                    {0.9f,0.7f,0.8f},   {0.15f,0.1f,0.15f},
+                    0.7f,1.3f, -0.7f,   waterY-0.06f, 0.5f, 0.7f);
 
     setupFishInstancing(vboClown, fishMesh, N_CLOWN);
     setupFishInstancing(vboNeon,  fishMesh, N_NEON);
     setupFishInstancing(vboDanio, fishMesh, N_DANIO);
+    setupFishInstancing(vboAngelfish, fishMesh, N_ANGELFISH);
+    setupFishInstancing(vboGoldfish, fishMesh, N_GOLDFISH);
+    setupFishInstancing(vboBetta, fishMesh, N_BETTA);
+    setupFishInstancing(vboGuppy, fishMesh, N_GUPPY);
+    setupFishInstancing(vboPlaty, fishMesh, N_PLATY);
 
     initPlantsAndRocks();
     initBubbles();
@@ -698,7 +1205,7 @@ int main(){
     // ---------- common params ----------
     glm::vec3 lightDir = glm::normalize(glm::vec3(-0.7f,-1.2f,-0.35f));
     glm::vec3 fogColor(0.02f,0.06f,0.09f);
-    float fogNear = 1.5f, fogFar = 9.0f;
+    float fogNear = 2.0f, fogFar = 12.0f;
     float exposure = 1.25f;
 
     float last = (float)glfwGetTime();
@@ -735,9 +1242,16 @@ int main(){
                 pos += vel*dt; f.pos=pos; f.vel=vel; f.phase += dt*3.0f;
             }
         };
-        updateSchool(clownfish, -0.55f, waterY-0.09f, 1.2f);
-        updateSchool(neon,      -0.50f, waterY-0.07f, 1.6f, 0.22f, 0.30f);
-        updateSchool(danio,     -0.50f, waterY-0.07f, 1.8f, 0.18f, 0.40f);
+        updateSchool(clownfish, -1.0f, waterY-0.09f, 1.2f);
+        updateSchool(neon,      -0.9f, waterY-0.07f, 1.6f, 0.22f, 0.30f);
+        updateSchool(danio,     -0.9f, waterY-0.07f, 1.8f, 0.18f, 0.40f);
+        updateSchool(angelfish, -0.8f, waterY-0.12f, 1.0f, 0.15f, 0.35f);
+        updateSchool(goldfish,  -0.7f, waterY-0.15f, 0.8f, 0.12f, 0.25f);
+        updateSchool(betta,     -0.6f, waterY-0.08f, 1.1f, 0.20f, 0.45f);
+        updateSchool(guppy,     -0.8f, waterY-0.05f, 1.4f, 0.25f, 0.35f);
+        updateSchool(platy,     -0.7f, waterY-0.06f, 1.3f, 0.18f, 0.30f);
+        
+
         updateBubbles(dt);
 
         // ------------------- Render to HDR FBO -------------------
@@ -786,6 +1300,43 @@ int main(){
             glBindVertexArray(rockMesh.vao);
             glDrawElements(GL_TRIANGLES, rockMesh.idxCount, GL_UNSIGNED_INT, 0);
         }
+        
+        // ===== Corals =====
+        glUniform1i(u(progBasic,"uMaterialType"), 2);
+        for (int i=0;i<N_CORALS;++i) {
+            glm::vec4 c = corals[i];
+            glm::mat4 M = glm::translate(glm::mat4(1.0f), glm::vec3(c.x, c.y, c.z))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(c.w));
+            glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(M));
+            glUniform3f(u(progBasic,"uBaseColor"), 0.8f+0.2f*(float)i/N_CORALS, 0.3f+0.2f*(float)i/N_CORALS, 0.4f+0.3f*(float)i/N_CORALS);
+            glBindVertexArray(coralMesh.vao);
+            glDrawElements(GL_TRIANGLES, coralMesh.idxCount, GL_UNSIGNED_INT, 0);
+        }
+        
+        // ===== Shells =====
+        glUniform1i(u(progBasic,"uMaterialType"), 3);
+        for (int i=0;i<N_SHELLS;++i) {
+            glm::vec4 s = shells[i];
+            glm::mat4 M = glm::translate(glm::mat4(1.0f), glm::vec3(s.x, s.y, s.z))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(s.w));
+            glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(M));
+            glUniform3f(u(progBasic,"uBaseColor"), 0.9f+0.1f*(float)i/N_SHELLS, 0.85f+0.1f*(float)i/N_SHELLS, 0.7f+0.2f*(float)i/N_SHELLS);
+            glBindVertexArray(shellMesh.vao);
+            glDrawElements(GL_TRIANGLES, shellMesh.idxCount, GL_UNSIGNED_INT, 0);
+        }
+        
+        // ===== Driftwood =====
+        glUniform1i(u(progBasic,"uMaterialType"), 4);
+        for (int i=0;i<N_DRIFTWOOD;++i) {
+            glm::vec4 d = driftwood[i];
+            glm::mat4 M = glm::translate(glm::mat4(1.0f), glm::vec3(d.x, d.y, d.z))
+                        * glm::rotate(glm::mat4(1.0f), (float)i * 0.5f, glm::vec3(0,1,0))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(d.w));
+            glUniformMatrix4fv(u(progBasic,"uModel"),1,GL_FALSE,glm::value_ptr(M));
+            glUniform3f(u(progBasic,"uBaseColor"), 0.4f+0.2f*(float)i/N_DRIFTWOOD, 0.25f+0.1f*(float)i/N_DRIFTWOOD, 0.15f+0.1f*(float)i/N_DRIFTWOOD);
+            glBindVertexArray(driftwoodMesh.vao);
+            glDrawElements(GL_TRIANGLES, driftwoodMesh.idxCount, GL_UNSIGNED_INT, 0);
+        }
         glUniform1i(u(progBasic,"uMaterialType"), 0);
 
         // ===== Plants =====
@@ -819,7 +1370,7 @@ int main(){
         glBindVertexArray(0);
 
         // ===== Fish =====
-        auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo){
+        auto uploadFish = [&](const std::vector<FishInst>& species, GLuint vbo, const Mesh& mesh){
             std::vector<float> inst; inst.resize(species.size()*15);
             for (size_t i=0;i<species.size();++i) {
                 const auto &f = species[i];
@@ -832,17 +1383,26 @@ int main(){
                 inst[o+11]=f.color.r;  inst[o+12]=f.color.g;  inst[o+13]=f.color.b;
                 inst[o+14]=f.species;
             }
-            glBindVertexArray(fishMesh.vao);
+
+            glBindVertexArray(mesh.vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glBufferSubData(GL_ARRAY_BUFFER, 0, inst.size()*sizeof(float), inst.data());
             glBindVertexArray(0);
         };
-        uploadFish(clownfish, vboClown);
-        uploadFish(neon,     vboNeon);
-        uploadFish(danio,    vboDanio);
+        uploadFish(clownfish, vboClown, clownfishMesh);
+        uploadFish(neon,     vboNeon, fishMesh);
+        uploadFish(danio,    vboDanio, fishMesh);
+        uploadFish(angelfish, vboAngelfish, angelfishMesh);
+        uploadFish(goldfish,  vboGoldfish, animatedFishMesh);
+        uploadFish(betta,     vboBetta, fishMesh);
+        uploadFish(guppy,     vboGuppy, fishMesh);
+        uploadFish(platy,     vboPlaty, fishMesh);
 
-        auto drawSpecies = [&](const std::vector<FishInst>& v, GLuint vbo){
-            glBindVertexArray(fishMesh.vao);
+        auto drawSpecies = [&](const std::vector<FishInst>& v, GLuint vbo, const Mesh& mesh){
+            if (v.empty()) {
+                return;
+            }
+            glBindVertexArray(mesh.vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glUseProgram(progFish);
             glUniformMatrix4fv(u(progFish,"uProj"),1,GL_FALSE,glm::value_ptr(proj));
@@ -860,12 +1420,19 @@ int main(){
             glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, brdfLUT);
             glUniform1i(u(progFish,"uBRDFLUT"), 3);
             glUniform1f(u(progFish,"uPrefLodMax"), (float)prefilterMaxMip);
-            glDrawElementsInstanced(GL_TRIANGLES, fishMesh.idxCount, GL_UNSIGNED_INT, 0, (GLsizei)v.size());
+            glDrawElementsInstanced(GL_TRIANGLES, mesh.idxCount, GL_UNSIGNED_INT, 0, (GLsizei)v.size());
             glBindVertexArray(0);
         };
-        drawSpecies(clownfish, vboClown);
-        drawSpecies(neon,     vboNeon);
-        drawSpecies(danio,    vboDanio);
+        // Temporary: Use procedural fish to test positioning
+        auto fallbackMesh = createFallbackMesh();
+        drawSpecies(clownfish, vboClown, fallbackMesh);
+        drawSpecies(neon,     vboNeon, fallbackMesh);
+        drawSpecies(danio,    vboDanio, fallbackMesh);
+        drawSpecies(angelfish, vboAngelfish, fallbackMesh);
+        drawSpecies(goldfish,  vboGoldfish, fallbackMesh);
+        drawSpecies(betta,     vboBetta, fallbackMesh);
+        drawSpecies(guppy,     vboGuppy, fallbackMesh);
+        drawSpecies(platy,     vboPlaty, fallbackMesh);
 
         // copy opaque for refraction
         glBindFramebuffer(GL_READ_FRAMEBUFFER, hdrFBO);
